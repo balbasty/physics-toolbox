@@ -1,36 +1,38 @@
-function llp = multicoil_ll_prior(s, prm, vs)
+function llp = multicoil_ll_prior(s, prm, gamma, alpha, bnd, optim, vs)
 % Compute prior log-likelihood
 %
 % FORMAT ll = multicoil_ll_prior(s, prm, vs)
 %
 % s   - (File)Array [Nx Ny Nz Nc (2)] - Complex log-sensitivity profiles
-% prm -       Array [1 3] or [Nc 3]   - Regularisation (/ coil) [a m b]
+% RegCoilFactor - Vector [Nc]      - Reg modulator / coil          [1]
+% RegCompFactor - [Mag Phase]      - Reg modulator / component     [1 1]
 % vs  -       Array [1 3]             - Voxel size [1 1 1]
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
-if nargin < 3
-    vs = [1 1 1];
-end
-if size(prm, 1) == 1
-    prm = repmat(prm, [size(s,4) 1]);
-end
+spm_field('boundary', bnd); 
+optim = logical(optim);
 
 % -------------------------------------------------------------------------
 % Compute log-likelihood (prior)
 llp = 0;
-for n=1:N
+for n=1:size(s,4)
     if size(s, 5) == 2
         % Two real components
-        s1 = single(s(:,:,:,n,:));
+        s1 = single(s(:,:,:,n,optim));
     else
         % One complex volume
-        s1 = single(s(:,:,:,n,:));
-        s1 = cat(5, real(s1), imag(s1));
+        if all(optim)
+            s1 = single(s(:,:,:,n));
+            s1 = cat(5, real(s1), imag(s1));
+        elseif optim(1)
+            s1 = real(single(s(:,:,:,n)));
+        elseif optim(2)
+            s1 = imag(single(s(:,:,:,n)));
+        end
     end
-    llpr = spm_field('vel2mom', s1(:,:,:,:,1), [vs prm(n,:)]);
-    llpr = -0.5 * double(reshape(llpr, 1, [])) * double(reshape(s1(:,:,:,:,1), [], 1));
-    llpi = spm_field('vel2mom', s1(:,:,:,:,2), [vs prm(n,:)]);
-    llpi = -0.5 * double(reshape(llpi, 1, [])) * double(reshape(s1(:,:,:,:,2), [], 1));
-    llp = llp + llpr + llpi;
+    s1 = reshape(s1, size(s1,1),size(s1,2),size(s1,3),size(s1,5));
+    llp1 = spm_field('vel2mom', s1, [vs alpha(n) * prm], gamma(optim));
+    llp1 = -0.5 * double(reshape(llp1, 1, [])) * double(reshape(s1, [], 1));
+    llp  = llp + llp1;
 end
