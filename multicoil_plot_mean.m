@@ -67,13 +67,20 @@ title('imag')
 % Covariance
 subplot(2,3,3)
 h = imagesc(C); colorbar
+colormap(h.Parent, viridis(128));
 daspect(h.Parent, [1 1 1]);
 title('covariance')
 
 % -------------------------------------------------------------------------
 % Log-likelihood
 subplot(2,3,6)
-plot(ll);
+cla reset
+if size(ll,1) == 2
+    yyaxis right
+    plot(ll(2,:));
+    yyaxis left
+end
+plot(ll(1,:));
 title('log-likelihood')
 
 drawnow
