@@ -1,11 +1,20 @@
-function multicoil_plot_fit(n, x, s, rho, vs, figname)
+function multicoil_plot_fit(n, x, s, rho, vs, figname, movie, it)
 % FORMAT multicoil_plot_fit(n, x, s, rho, (vs), (figname))
 
-if nargin < 6
-    figname = sprintf('Multicoil fit');
-    if nargin < 4
-        vs = [1 1 1];
+if nargin < 8
+    it = NaN;
+    if nargin < 7
+        movie = '';
+        if nargin < 6
+            figname = sprintf('Multicoil fit');
+            if nargin < 5
+                vs = [1 1 1];
+            end
+        end
     end
+end
+if isempty(figname)
+    figname = sprintf('Multicoil fit');
 end
 
 % -------------------------------------------------------------------------
@@ -56,7 +65,9 @@ colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
 colorbar
-title(sprintf('magnitude (obs & fit) %d', n))
+strtitle = sprintf('magnitude (obs & fit) %d', n);
+if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
+title(strtitle)
 
 % -------------------------------------------------------------------------
 % Phase
@@ -66,7 +77,9 @@ colormap(h.Parent, phasemap(128));
 daspect(h.Parent, vs);
 axis off
 colorbar
-title(sprintf('phase (obs & fit) %d', n))
+strtitle = sprintf('phase (obs & fit) %d', n);
+if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
+title(strtitle)
 
 % -------------------------------------------------------------------------
 % Real
@@ -76,7 +89,9 @@ colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
 colorbar
-title(sprintf('real (obs & fit & res) %d', n))
+strtitle = sprintf('real (obs & fit) %d', n);
+if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
+title(strtitle)
 
 % -------------------------------------------------------------------------
 % Real
@@ -86,6 +101,22 @@ colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
 colorbar
-title(sprintf('imaginary (obs & fit & res) %d', n))
+strtitle = sprintf('imaginary (obs & fit) %d', n);
+if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
+title(strtitle)
 
 drawnow
+
+
+% -------------------------------------------------------------------------
+% Write movie
+if ~isempty(movie)
+    frame = getframe(f);
+    [imind, cm] = rgb2ind(frame2im(frame), 256);
+    framerate = 1;
+    if ~exist(movie, 'file')
+        imwrite(imind, cm, movie, 'gif', 'Loopcount', inf, 'DelayTime', 1/framerate); 
+    else
+        imwrite(imind, cm, movie, 'gif', 'WriteMode', 'append', 'DelayTime', 1/framerate); 
+    end
+end
