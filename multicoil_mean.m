@@ -27,6 +27,7 @@ function rho = multicoil_mean(varargin)
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
 if nargin < 5 || sum(varargin{5}) == 0
+    if numel(varargin) > 4, varargin = varargin(1:4); end
     rho = multicoil_mean_ml(varargin{:});
 else
     rho = multicoil_mean_map(varargin{:});

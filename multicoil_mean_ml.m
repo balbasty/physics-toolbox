@@ -1,4 +1,4 @@
-function rho = multicoil_mean_ml(x, s, A, rho)
+function rho = multicoil_mean_ml(x, s, A, rho, optim)
 % Maximum likelihood mean given a set of observed coil images, 
 % log-sensitivity profiles and a noise precision (= inverse covariance) 
 % matrix.
@@ -25,6 +25,14 @@ function rho = multicoil_mean_ml(x, s, A, rho)
 % Allocate output volume
 if nargin < 4
     rho = zeros(size(x,1), size(x,2), size(x,3), 1, size(x,5), 'single');
+end
+if nargin < 5
+    optim = [true true];
+end
+optim = logical(optim);
+if ~any(optim)
+    warning('Nothing to optimise');
+    return
 end
 
 % -------------------------------------------------------------------------
@@ -66,6 +74,30 @@ for z=1:size(rho, 3)
     rho1 = dot(Ab, double(x1), 2);
     rho1 = rho1 ./ single(dot(Ab, double(s1), 2));
     clear Ab
+    
+    if ~all(optim)
+        if size(rho, 5) == 2
+            % Two real components
+            rho0 = reshape(single(rho(:,:,z,:,:)), [], 2);
+            rho0 = rho0(:,1) + 1i*rho0(:,2);
+        else
+            % One complex volume
+            rho0 = reshape(single(rho(:,:,z,:)), [], 1);
+        end
+        if isa(A, 'gpuArray')
+            rho0 = gpuArray(rho0);
+        end
+        if optim(1)
+            phi = angle(rho0);
+            mag = real(exp(-1i*phi).*rho1);
+            rho1 = mag .* exp(1i*phi);
+        else
+            mag  = abs(rho0); clear rho0
+            phi  = real(-(1/1i)*log(mag./rho1));
+            rho1 = mag .* exp(1i*phi);
+        end
+    end
+    
     rho1 = reshape(rho1, [size(rho,1) size(rho,2)]);
     
     % ---------------------------------------------------------------------
