@@ -32,7 +32,7 @@ for n=1:size(x,4)
 
     % Decimate k-space
     x1 = reshape(x1, numel(msk), []);
-    x1(msk) = 0;
+    x1(~msk) = 0;
     x1 = reshape(x1, dim);
 
     % Inverse FFT
