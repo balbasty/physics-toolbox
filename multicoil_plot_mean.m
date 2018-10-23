@@ -40,7 +40,7 @@ title('magnitude')
 % Phase
 subplot(2,3,2)
 h = imagesc(angle(rho1));
-colormap(h.Parent, 'hsv')
+colormap(h.Parent, phasemap(128));
 daspect(h.Parent, vs);
 axis off
 title('phase')
@@ -49,6 +49,7 @@ title('phase')
 % Real
 subplot(2,3,4)
 h = imagesc(real(rho1));
+colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
 title('real')
@@ -57,6 +58,7 @@ title('real')
 % Imag
 subplot(2,3,5)
 h = imagesc(imag(rho1));
+colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
 title('imag')
