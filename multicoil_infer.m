@@ -1,23 +1,52 @@
 function [s,rho,A,ll,llm,llp] = multicoil_infer(varargin)
-% Compute mode estimates (ML, MAP) of the prameters of a probabilistic 
+% Compute mode estimates (ML, MAP) of the parameters of a probabilistic 
 % model of complex multicoil MR images.
 %
-% FORMAT [s,rho,A,ll] = multicoil_infer(x, s, rho, A, prm, vs, vrb)
+% FORMAT [sens,mean,prec,ll] = multicoil_infer(coils, ...)
 %
-% x   - (File)Array [Nx Ny Nz Nc (2)] - Complex coil images
-% s   - (File)Array [Nx Ny Nz Nc (2)] - Complex log-sensitivity profiles
-% rho - (File)Array [Nx Ny Nz  1 (2)] - Complex mean image
-% A   -       Array [Nc Nc]           - Noise precision matrix
-% prm -       Array [1 3] or [Nc 3]   - Regularisation (/ coil) [a m b]
-% vs  -       Array [1 3]             - Voxel size [1 1 1]
-% vrb -                               - Verbosity (0=quiet, [1]=print, 2=plot)
+% REQUIRED
+% --------
+% coils - (File)Array [Nx Ny Nz Nc (2)] - Complex coil images
+%
+% KEYWORDS
+% --------
+% Precision     - Noise precision matrix                    [NaN=estimate]
+% RegCoilFactor - Regularisation factor per coil            [1]
+% RegCoilComp   - Regularisation factor per Re/Im component [1E5]
+% VoxelSize     - Voxel size                                [1 1 1]
+% SensOptim     - Optimize real and/or imaginary parts      [true true]
+% CovOptim      - Optimize noise covariance                 [false]
+% Tolerance     - Convergence threshold                     [1E-3]
+% IterMax       - Total maximum number of iterations        [100]
+% SubIterMax    - Maximum number of iterations / sub-loop   [15]
+% IterMin       - Total minimum number of iterations        [1]
+% SubIterMin    - Minimum number of iterations / sub-loop   [1]
+% Verbose       - (-1=quiet,0=moderate,1=verbose,2=plot)    [0]
+%
+% ADVANCED
+% --------
+% SensMaps      - Initial complex sensitivity profiles      (File)Array [Nx Ny Nz Nc (2)]
+% MeanImage     - Initial complex mean image                (File)Array [Nx Ny Nz  1 (2)]
+% RegStructure  - Regularisation Structure (abs memb bend)  [0 0 1]
+% RegBoundary   - Boundary conditions for sensitivities     ['neumann']
+% Parallel      - Activate parallelisation                  [false]
+% LLCond        - Previous conditional log-likelihood       [NaN=compute]
+% LLPrior       - Previous prior log-likelihood             [NaN=compute]
+% LLPrev        - Log-likelihood of previous iterations     []
+%
+% OUTPUT
+% ------
+% sens - (Log)-Sensitivity maps - (File)Array [Nx Ny Nz Nc (2)]
+% mean - Mean image             - (File)Array [Nx Ny Nz Nc (2)]
+% prec - Noise precision        -       Array [Nc Nc]
+% ll   - Log-likelihood
 %
 % Nc = number of coils
 % Images can either be complex or have two real components that are then 
 % assumed to be the real and imaginary parts.
-% An output FileArray can be provided by using `rho` as an input. If not 
-% provided, the output volume will have the same format as the input coil 
-% volume.
+% An output FileArray can be provided by using `MeanImage` as an input. If  
+% not provided, the output volume will have the same format as the input  
+% coil volume.
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
@@ -48,14 +77,14 @@ p.FunctionName = 'multicoil_infer';
 p.addRequired('CoilImages',                  @isarray);
 p.addParameter('SensMaps',      [],          @isarray);
 p.addParameter('MeanImage',     [],          @isarray);
-p.addParameter('Precision',     1,           @isnumeric);
+p.addParameter('Precision',     NaN,         @isnumeric);
 p.addParameter('RegStructure',  [0 0 1],     @(X) isnumeric(X) && numel(X) == 3);
 p.addParameter('RegCoilFactor', 1,           @isnumeric);
-p.addParameter('RegCompFactor', 1,           @(X) isnumeric(X) && numel(X) <= 2);
+p.addParameter('RegCompFactor', 1E5,         @(X) isnumeric(X) && numel(X) <= 2);
 p.addParameter('RegBoundary',   1,           @isboundary);
 p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('SensOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
-p.addParameter('CovOptim',      true,        @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
+p.addParameter('CovOptim',      false,       @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.addParameter('Parallel',      0,           @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.addParameter('Tolerance',     1E-3,        @(X) isnumeric(X) && isscalar(X));
 p.addParameter('IterMax',       100,         @(X) isnumeric(X) && isscalar(X));
@@ -93,7 +122,10 @@ ll            = p.Results.LLPrev;
 % Post-process input
 N = size(x,4);
 
-% Precision: default = identity
+% Precision: default = estimate from magnitude
+if isnan(A)
+    [~,A] = multicoil_init_cov(x);
+end
 if numel(A) == 1
     A = A * eye(N);
 end
@@ -105,39 +137,28 @@ gamma = gamma * sum(alpha);
 alpha = alpha/sum(alpha);
 % Allocate mean
 if isempty(rho)
-    rho = zeros(size(x,1),size(x,2),size(x,3));
+    rho = zeros(size(x,1),size(x,2),size(x,3), 'like', x);
 end
-% Allocate sensitivity (TODO: do not allocate phase if not needed?)
 if isempty(s)
-    s = zeros(size(x,1),size(x,2),size(x,3),N,2);
+    s = zeros(size(x,1),size(x,2),size(x,3),N,'like',x);
 end
 
 % -------------------------------------------------------------------------
 % Hierarchical optimisation
+% > This can be used to start with a large regularization and decrease it
+%   iteratively. It is hard to choose an optimal scheme in terms of
+%   convergence/speed/local minima, so it is not used for now.
+%   This should probably be option-based anyway.
 
-if size(s,5) == 1
-    optim_cov   =     [0] * optim_cov;
-    optim_mag   =     [1] * optim(1);
-    optim_phase =     [0] * optim(2);
-    gamma_mag   = 10.^[0] * gamma(1);
-    gamma_phase = 10.^[0] * gamma(2);
-    tol         = 10.^[0] * tol;
-else
-%     optim_cov   =     [0 0 1] * optim_cov;
-%     optim_mag   =     [0 1 1] * optim(1);
-%     optim_phase =     [1 1 1] * optim(2);
-%     gamma_mag   = 10.^[0 0 0] * gamma(1);
-%     gamma_phase = 10.^[0 0 0] * gamma(2);
-%     tol         = 10.^[0 0 0] * tol;
-    optim_cov   =     [0] * optim_cov;
-    optim_mag   =     [0] * optim(1);
-    optim_phase =     [1] * optim(2);
-    gamma_mag   = 10.^[0] * gamma(1);
-    gamma_phase = 10.^[0] * gamma(2);
-    tol         = 10.^[0] * tol;
-end
+% Set hierarchical scheme
+optim_cov   =     [1] * optim_cov;
+optim_mag   =     [1] * optim(1);
+optim_phase =     [1] * optim(2);
+gamma_mag   = 10.^[0] * gamma(1);
+gamma_phase = 10.^[0] * gamma(2);
+tol         = 10.^[0] * tol;
 
-% Remove consecutive repeated combinations
+% Remove consecutive repeated combinations to save time
 prm = [optim_cov ; optim_mag ; optim_phase ; gamma_mag ; gamma_phase ; tol];
 prm(:,all(diff(prm,1,2) == 0)) = [];
 
@@ -150,17 +171,9 @@ tol         = prm(6,:);
 stop        = zeros(1,numel(tol));
 stop(end)   = 1;
 
-% optim_cov   =     [0 0 0 0 1];
-% optim_mag   =     [1 1 1 1 1] * optim(1);
-% optim_phase =     [1 1 1 1 1] * optim(2);
-% gamma_mag   = 10.^[3 2 1 0 0] * gamma(1);
-% gamma_phase = 10.^[3 2 1 0 0] * gamma(2);
-% tol         = 10.^[0 0 0 0 0] * tol;
-% stop        =     [0 0 0 0 1];
-
 % -------------------------------------------------------------------------
 % Time execution
-if verbose > 0
+if verbose > -1
     fprintf('Processing started\n');
     start = tic;
 end
@@ -169,18 +182,27 @@ end
 % Initial estimates
 rho = multicoil_mean_ml(x, s, A, rho, [optim_mag(1) optim_phase(1)]);
 
+% Phase is periodic, and phase wraps should not be penalised. However,
+% periodic domains are not handled by spm_field, which deals with
+% regularization. To circumvent this issue, I try to never wrap the phase.
+% A common problem, though, is that the same target value of pi/-pi might 
+% be converged towards from two sides (negative and positive), which
+% sometimes leads to bad local minima. The solution I found is to
+% initialise the sensitivity phase using the Von Mises mean of pointwise
+% differences between the mean and the coil image.
+% See: * Bishop's PRML - chapter 2.3.8
+%      * https://en.wikipedia.org/wiki/Von_Mises_distribution
 if optim(2)
+    % Let's do a few iterations of those too centre the mean image.
     for i=1:5
         s   = multicoil_init_phase(rho, x, s);
         rho = multicoil_mean_ml(x, s, A, rho, [optim_mag(1) optim_phase(1)]);
     end
 end
 
+% Compute log-determinant of precision matrix
 C   = inv(A);
 ldC = spm_matcomp('LogDet', C);
-if verbose > 1
-    multicoil_plot_mean(rho, C, NaN, vs);
-end
 
 if isnan(llp)
     % > Initial log-likelihood (prior term)
@@ -191,6 +213,11 @@ if isnan(llm)
     % > Initial log-likelihood (cond term)
     llm = multicoil_ll_cond(x,s,rho,A) ...
         - size(x,1)*size(x,2)*size(x,3)*ldC;
+end
+ll = [ll (llm+llp)];
+
+if verbose > 1
+    multicoil_plot_mean(rho, C, ll, vs);
 end
 
 % -------------------------------------------------------------------------
@@ -214,7 +241,7 @@ for it=1:itermax
             fprintf('- Tolerance:        %g\n', tol(1));
         end
     end
-    if verbose > 0
+    if verbose > -1
         fprintf('Iteration %d | Sub-iteration %d\n', it, it-it0);
     end
     
@@ -234,7 +261,7 @@ for it=1:itermax
     
     % ---------------------------------------------------------------------
     % Coil-wise sensitivity update
-    for n=1:N % randperm(size(x,4))
+    for n=1:N
         
         % Update mean (ML = closed-form / MAP = Gauss-Newton)
         rho = multicoil_mean_ml(x, s, A, rho, [optim_mag(1) optim_phase(1)]);
@@ -275,10 +302,26 @@ for it=1:itermax
     
     % ---------------------------------------------------------------------
     % Center sensitivity fields
-    sumsen = sum(bsxfun(@times, numeric(s), reshape(alpha, [1 1 1 N])), 4);
-    s(:,:,:,:,:) = bsxfun(@minus, numeric(s), sumsen);
+    
+    % We know that, at the optimum, sum{alpha_n*s_n} = 0
+    % To converge faster, and to avoid bias towards the initial mean
+    % estimate, we enforce this condition at each iteration.
+    % Note that the log-likelihood changes slightly and might drop
+    % during the first iterations.
+    sumsen = zeros(size(s,1),size(s,2),size(s,3),1,size(s,5),'single');
+    for n=1:N
+        sumsen = sumsen + alpha(n)*single(s(:,:,:,n,:));
+    end
+    for n=1:N
+        s(:,:,:,n,:) = s(:,:,:,n,:) - alpha(n) * sumsen;
+    end
+    % Should I update the log-likelihood? the prior part is easy to
+    % update, but the conditional part also changes, and this is
+    % slightly more costly to compute.
+    % It does not seem to matter much, so I'm not gonna update it.
+    % llpsum = multicoil_ll_prior(sumsen, reg, [gamma_mag(1) gamma_phase(1)], 1, bnd, [optim_mag(1) optim_phase(1)], vs);
+    % lp = llp - llpsum;
     clear sumsen
-    % Should I update llp here?
     
     
     % ---------------------------------------------------------------------
@@ -339,7 +382,7 @@ end
 
 % -------------------------------------------------------------------------
 % Time execution
-if verbose > 0
+if verbose > -1
     stop = toc(start);
     fprintf('Processing finished: in %s\n', sec2ydhms(stop));
 end

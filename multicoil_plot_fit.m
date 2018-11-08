@@ -1,6 +1,14 @@
 function multicoil_plot_fit(n, x, s, rho, vs, figname, movie, it)
 % FORMAT multicoil_plot_fit(n, x, s, rho, (vs), (figname))
 
+% -------------------------------------------------------------------------
+% Set path
+path = fileparts(which('multicoil_plot_fit'));
+addpath(fullfile(path, 'colormaps'));
+addpath(fullfile(path, 'phasemap'));
+
+% -------------------------------------------------------------------------
+% Default parameters
 if nargin < 8
     it = NaN;
     if nargin < 7
@@ -27,34 +35,18 @@ set(0, 'CurrentFigure', f);
 
 % -------------------------------------------------------------------------
 % Select slice
-z = ceil(size(rho,3)/2);
-
-if size(rho,5) == 2
-    rho1 = double(rho(:,:,z,:,:));
-    rho1 = rho1(:,:,:,:,1) + 1i * rho1(:,:,:,:,2);
-else
-    rho1 = double(rho(:,:,z,:));
-end
-if size(s,5) == 2
-    s1 = double(s(:,:,z,n,:));
-    s1 = s1(:,:,:,:,1) + 1i * s1(:,:,:,:,2);
-else
-    s1 = double(s(:,:,z,n));
-end
-s1 = exp(s1);
-if size(x,5) == 2
-    x1 = double(x(:,:,z,n,:));
-    x1 = x1(:,:,:,:,1) + 1i * x1(:,:,:,:,2);
-else
-    x1 = double(x(:,:,z,n));
-end
+z    = ceil(size(rho,3)/2);
+rho1 = double(rho(:,:,z,:));
+s1   = double(s(:,:,z,n));
+s1   = exp(s1);
+x1   = double(x(:,:,z,n));
 
 % -------------------------------------------------------------------------
 % Build images
 fit = s1.*rho1;
 res = x1 - fit;
 
-obsfit = [x1 fit ];
+obsfit    = [x1 fit];
 obsfitres = [x1 fit res];
 
 

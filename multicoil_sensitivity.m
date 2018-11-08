@@ -5,8 +5,8 @@ function [s,llm,llp,ok,ls] = multicoil_sensitivity(varargin)
 %
 % FORMAT [s,...] = multicoil_sensitivity(rho, x, s, ...)
 %
-% MANDATORY
-% ---------
+% REQUIRED
+% --------
 % rho   - (File)Array [Nx Ny Nz  1 (2)] - (Complex) mean image
 % x     - (File)Array [Nx Ny Nz Nc (2)] - (Complex) coil images
 % s     - (File)Array [Nx Ny Nz Nc (2)] - (Complex) log-sensitivity maps
@@ -42,6 +42,21 @@ function [s,llm,llp,ok,ls] = multicoil_sensitivity(varargin)
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
+%__________________________________________________________________________
+% Development notes / Yael / 8 Nov 2018 
+%
+% This file is a bit complicated, as it tries to deal with various
+% parameterisations of the sensitivity fields:
+% - It is possible to update only one of the (log)-field components, using
+%   the `SensOptim` option. This also complicates stuff a bit.
+% 
+% Note that I am thinking of adding yet another representation, where
+% log-sensitivity fields are directly encoded by their discrete cosine
+% components. This might help to deal better with small autocalibration
+% regions, where the finite element approximation used in the
+% regularization matrix becomes too poor.
+%__________________________________________________________________________
+
 % -------------------------------------------------------------------------
 % Helper functions to check input arguments
 function ok = isarray(X)
@@ -52,10 +67,6 @@ function ok = isboundary(X)
          (ischar(X)    && any(strcmpi(X, {'c','circulant','n','neumann'})));
 end
 function ok = isrealarray(X)
-    if size(X,5) == 2
-        ok = false;
-        return
-    end
     function okk = isrealtype(T)
         okk = numel(T) > 7 || ~strcmpi(T(1:7),'complex');
     end
@@ -81,7 +92,6 @@ p.addParameter('RegCompFactor', 1,           @(X) isnumeric(X) && numel(X) <= 2)
 p.addParameter('RegBoundary',   1,           @isboundary);
 p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('LLPrior',       NaN,         @(X) isnumeric(X) && isscalar(X));
-p.addParameter('CentreFields',  false,       @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.addParameter('SensOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
 p.addParameter('Parallel',      0,           @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.parse(varargin{:});
@@ -97,7 +107,6 @@ bnd   = p.Results.RegBoundary;
 vs    = p.Results.VoxelSize;
 llp   = p.Results.LLPrior;
 optim = p.Results.SensOptim;
-centre_fields = p.Results.CentreFields;
 Nw    = p.Results.Parallel;
 
 % -------------------------------------------------------------------------
@@ -150,126 +159,144 @@ if Nw > 0
     warning('Parallel processing not implemented. Running sequential instead.')
     Nw = 0;
 end
-% Centre fields: ensure logical
-centre_fields = logical(centre_fields);
 
 % -------------------------------------------------------------------------
 % Boundary condition (usually Neumann = null derivative)
 spm_field('boundary', bnd); 
 
 % -------------------------------------------------------------------------
+% Prepare stuff to save time in the loop
+% --- Dimensions
+lat = [size(x,1) size(x,2) size(x,3)];
+% --- GPU
+gpu_on = isa(A, 'gpuArray');
+if gpu_on, loadarray = @loadarray_gpu;
+else,      loadarray = @loadarray_cpu; end
+% --- Log-likelihood
+function llm = computellm(n,ds)
+    llm = 0;
+    % ---------------------------------------------------------------------
+    % Compute gradient slice-wise to save memory
+    % parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
+    for z=1:lat(3)          % < Uncomment for sequential processing
+
+        % -----------------------------------------------------------------
+        % Enforce boundary condition -> needed with parfor
+        spm_field('boundary', bnd); 
+
+        % -----------------------------------------------------------------
+        % Load one slice of the complete coil dataset
+        xz = loadarray(x(:,:,z,:), @single);
+        xz = reshape(xz, [], N);
+
+        % -----------------------------------------------------------------
+        % Load one slice of the mean
+        rhoz = loadarray(rho(:,:,z,:), @single);
+        rhoz = reshape(rhoz, [], 1);
+
+        % -----------------------------------------------------------------
+        % Load one slice of the delta sensitivity
+        dsz   = loadarray(ds(:,:,z,:), @single);
+        dsz   = reshape(dsz, [], size(ds,4));
+        if all(optim)
+            dsz = dsz(:,1) + 1i * dsz(:,2);
+        elseif optim(2)
+            dsz = 1i * dsz(:,2);
+        end
+        
+        % -----------------------------------------------------------------
+        % Load one slice of the complete sensitivity dataset + correct
+        sz      = loadarray(s(:,:,z,:), @single);
+        sz      = reshape(sz, [], N);
+        sz(:,n) = sz(:,n) - dsz;
+        dsz     = [];
+        sz      = single(exp(double(sz)));
+        rhoz    = bsxfun(@times, rhoz, sz);
+        sz      = []; % clear
+
+        % -----------------------------------------------------------------
+        % Compute log-likelihood
+        tmp = (rhoz - xz) * A;
+        llm = llm - 0.5 * sum(double(real(dot(tmp, rhoz - xz, 2))));
+        
+        rhoz = [];
+        xz   = [];
+    end % < loop z
+end % < function computellm
+    
+% -------------------------------------------------------------------------
+% Compute log-likelihood (prior)
+if isnan(llp)
+    llp = multicoil_ll_prior(s, prm, gamma, alpha, bnd, optim, vs);
+end
+    
+% -------------------------------------------------------------------------
 % For each coil
 for n=all_n
     
     % ---------------------------------------------------------------------
-    % Compute log-likelihood (prior)
-    if isnan(llp)
-        llp = multicoil_ll_prior(s, prm, gamma, alpha, bnd, optim, vs);
-    end
-    
-    % ---------------------------------------------------------------------
-    % Prepare weights: beta(n,m) = [n == m] - alpha(n)
-    beta    = repmat(-alpha(n), [1 N]);
-    beta(n) = 1 + beta(n);
-    
-    % ---------------------------------------------------------------------
     % Allocate conjugate gradient and Hessian
-    g = zeros(size(x,1), size(x,2), size(x,3), sum(optim), 'single');
-    H = zeros(size(x,1), size(x,2), size(x,3), 1, 'single');
-    if isa(A, 'gpuArray')
-        g = gpuArray(g);
-        H = gpuArray(H);
-    end
+    g   = zeros([lat sum(optim)], 'single');
+    H   = zeros([lat 1], 'single');
     llm = 0;
     
     % ---------------------------------------------------------------------
     % Compute gradient slice-wise to save memory
-    % parfor(z=1:size(rho, 3), Nw) % < Uncomment for parallel processing
-    for z=1:size(rho,3)          % < Uncomment for sequential processing
+    % parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
+    for z=1:lat(3)          % < Uncomment for sequential processing
 
-        gz = g(:,:,z,:);
-        Hz = H(:,:,z);
+        % -----------------------------------------------------------------
+        % Enforce boundary condition -> needed with parfor
+        spm_field('boundary', bnd); 
         
         % -----------------------------------------------------------------
         % Load one slice of the complete coil dataset
-        if size(x, 5) == 2
-            % Two real components
-            x1 = reshape(single(x(:,:,z,:,:)), [], size(x,4), 2);
-            x1 = x1(:,:,1) + 1i*x1(:,:,2);
-        else
-            % One complex volume
-            x1 = reshape(single(x(:,:,z,:)), [], size(x,4));
-        end
-        if isa(A, 'gpuArray')
-            x1 = gpuArray(x1);
-        end
+        xz = loadarray(x(:,:,z,:), @single);
+        xz = reshape(xz, [], N);
 
         % -----------------------------------------------------------------
         % Load one slice of the mean
-        if size(rho, 5) == 2
-            % Two real components
-            rho1 = reshape(single(rho(:,:,z,:,:)), [], 1, 2);
-            rho1 = rho1(:,:,1) + 1i*rho1(:,:,2);
-        else
-            % One complex volume
-            rho1 = reshape(single(rho(:,:,z,:,:)), [], 1);
-        end
-        if isa(A, 'gpuArray')
-            rho1 = gpuArray(rho1);
-        end
+        rhoz = loadarray(rho(:,:,z,:), @single);
+        rhoz = reshape(rhoz, [], 1);
 
         % -----------------------------------------------------------------
         % Load one slice of the complete sensitivity dataset + correct
-        if size(s, 5) == 2
-            % Two real components
-            s1 = reshape(double(s(:,:,z,:,:)), [], size(x,4), 2);
-            s1 = single(exp(s1(:,:,1) + 1i*s1(:,:,2)));
-        else
-            % One complex volume
-            s1 = reshape(single(exp(double(s(:,:,z,:,:)))), [], size(x,4));
-        end
-        if isa(A, 'gpuArray')
-            s1 = gpuArray(s1);
-        end
-        rho1 = bsxfun(@times, rho1, s1);
-        s1   = []; % clear
+        sz   = loadarray(s(:,:,z,:), @single);
+        sz   = reshape(sz, [], N);
+        sz   = single(exp(double(sz)));
+        rhoz = bsxfun(@times, rhoz, sz);
+        sz   = []; % clear
         
         % -----------------------------------------------------------------
         % Compute gradient
         
-        tmp = (rho1 - x1) * A;
+        tmp = (rhoz - xz) * A;
         
-        llm = llm - 0.5 * sum(double(real(dot(tmp, rho1 - x1, 2))));
+        llm = llm - 0.5 * sum(double(real(dot(tmp, rhoz - xz, 2))));
         
-        if centre_fields
-            rho1 = bsxfun(@times, rho1, beta);
-            tmp  = dot(tmp, rho1, 2);
-        else
-            tmp = rho1(:,n) .* conj(tmp(:,n));
-        end
+        tmp = rhoz(:,n) .* conj(tmp(:,n));
         
-        i = 1;
+        gz = zeros([size(tmp,1) sum(optim)], 'like', real(tmp(1)));
+        i  = 1;
         if optim(1) % If optimise sensitivity magnitude
-            gz(:,:,1,i) = gz(:,:,1,i) + reshape( real(tmp), size(gz,1), size(gz,2));
+            gz(:,i) = real(tmp);
             i = i+1;
         end
         if optim(2) % If optimise sensitivity phase
-            gz(:,:,1,i) = gz(:,:,1,i) + reshape(-imag(tmp), size(gz,1), size(gz,2));
+            gz(:,i) = -imag(tmp);
         end
-        g(:,:,z,:)  = gz;
-        gz          = []; % clear
         
-        if centre_fields
-            tmp = real(dot(rho1, rho1 * A, 2));
-        else
-            tmp = A(n,n) * real(conj(rho1(:,n)) .* rho1(:,n));
-        end
-        H(:,:,z) = reshape(tmp, size(Hz,1), size(Hz,2));
+        Hz = A(n,n) * real(conj(rhoz(:,n)) .* rhoz(:,n));
+        
+        g(:,:,z,:)  = reshape(gz, lat(1), lat(2), 1, []);
+        gz          = []; % clear
+        H(:,:,z)    = reshape(Hz, lat(1), lat(2));
+        Hz          = []; % clear
         
         tmp  = []; % clear
-        x1   = []; % clear
-        rho1 = []; % clear
-    end
+        xz   = []; % clear
+        rhoz = []; % clear
+    end % < loop z
     
     % ---------------------------------------------------------------------
     % Gather gradient & Hessian (if on GPU)
@@ -278,87 +305,39 @@ for n=all_n
     
     % ---------------------------------------------------------------------
     % Gradient: add prior term
-    if size(s, 5) == 2
-        % Two real components
-        if all(optim)
-            s0 = single(s(:,:,:,n,:));
-        elseif optim(1)
-            s0 = single(s(:,:,:,n,1));
-        elseif optim(2)
-            s0 = single(s(:,:,:,n,2));
-        end
-    else
-        % One complex volume
-        if all(optim)
-            s0 = single(s(:,:,:,n));
-            s0 = cat(5, real(s0), imag(s0));
-        elseif optim(1)
-            s0 = real(single(s(:,:,:,n)));
-        elseif optim(2)
-            s0 = imag(single(s(:,:,:,n)));
-        end
+    if all(optim)
+        s0 = zeros([lat 2], 'single');
+        s1 = single(s(:,:,:,n));
+        s0(:,:,:,1) = real(s1);
+        s0(:,:,:,2) = imag(s1);
+        clear s1
+    elseif optim(1)
+        s0 = real(single(s(:,:,:,n)));
+    elseif optim(2)
+        s0 = imag(single(s(:,:,:,n)));
     end
-    s0 = reshape(s0, [size(s0,1) size(s0,2) size(s0,3) size(s0,5)]);
-    g  = g + spm_field('vel2mom', s0, [vs alpha(n) * prm], gamma(optim));
-    clear s0
+    g  = g + spm_field('vel2mom', s0, [vs alpha(n)*prm], gamma(optim));
 
     % ---------------------------------------------------------------------
     % Gauss-Newton
-    regH = alpha(n) * prm;
-    if centre_fields
-        regH = regH * beta(n);
-    end
-    ds = [];
-    i  = 1;
+    ds = zeros(size(s0), 'single');
+    i = 1;
     if optim(1)
-        ds = cat(4,ds,spm_field(H, g(:,:,:,i), [vs regH 2 2], gamma(1)));
-        i = i+1;
+        ds(:,:,:,i) = spm_field(H, g(:,:,:,i), [vs alpha(n)*prm 2 2], gamma(1));
+        i = i + 1;
     end
     if optim(2)
-        ds = cat(4,ds,spm_field(H, g(:,:,:,i), [vs regH 2 2], gamma(2)));
+        ds(:,:,:,i) = spm_field(H, g(:,:,:,i), [vs alpha(n)*prm 2 2], gamma(2));
     end
     clear g H
     
     % ---------------------------------------------------------------------
     % Parts for log-likelihood (prior)
-    Lds = spm_field('vel2mom', ds, [vs alpha(n) * prm], gamma(optim));
-    if centre_fields
-        sums = 0;
-        sumb = sum(alpha .* beta(:)'.^2);
-        for m=1:N
-            if size(s, 5) == 2
-                % Two real components
-                if all(optim)
-                    s1 = single(s(:,:,:,m,:));
-                elseif optim(1)
-                    s1 = single(s(:,:,:,m,1));
-                elseif optim(2)
-                    s1 = single(s(:,:,:,m,2));
-                end
-            else
-                % One complex volume
-                if all(optim)
-                    s1 = single(s(:,:,:,m));
-                    s1 = cat(4, real(s1), imag(s1));
-                elseif optim(1)
-                    s1 = real(single(s(:,:,:,m)));
-                elseif optim(2)
-                    s1 = imag(single(s(:,:,:,m)));
-                end
-            end
-            sums = sums + alpha(m) * beta(m) * s1;
-            clear s1
-        end
-        % part1 = (sum alpha*beta) * (ds)'L(ds)
-        % part2 = -2 * (sum alpha*beta*s)'L(ds)
-        part1 = sumb * double(reshape(ds, 1, [])) * double(reshape(Lds, [], 1));
-        part2 = -2 * double(reshape(Lds, 1, [])) * double(reshape(sums, [], 1));
-        clear Lds sums sumb
-    else
-        part = alpha(n) * double(reshape(ds, 1, [])) * double(reshape(Lds, [], 1));
-        clear Lds
-    end
-        
+    Lds = spm_field('vel2mom', ds, [vs alpha(n)*prm], gamma(optim));
+    llp_part1 = alpha(n) * double(reshape(s0, 1, [])) * double(reshape(Lds, [], 1));
+    llp_part2 = alpha(n) * double(reshape(ds, 1, [])) * double(reshape(Lds, [], 1));
+    clear s0 Lds
+    
     % ---------------------------------------------------------------------
     % Line-Search
     llm0   = llm;
@@ -369,16 +348,12 @@ for n=all_n
         
         % -----------------------------------------------------------------
         % Compute log-likelihood (prior)
-        if centre_fields
-            llp = -0.5 * (armijo^2 * part1 + armijo * part2);
-        else
-            llp = -0.5 * armijo^2 * part;
-        end
+        llp = -0.5 * (armijo^2 * llp_part2 - 2 * armijo * llp_part1);
         llp = llp0 + llp;
         
         % -----------------------------------------------------------------
         % Compute log-likelihood (conditional)
-        llm = computellm(A, rho, x, s, armijo * ds, n, beta, optim);
+        llm = computellm(n, armijo*ds);
         
         % -----------------------------------------------------------------
         % Check progress
@@ -389,116 +364,22 @@ for n=all_n
             armijo = armijo/2;
         end
         
-    end
+    end % < loop ls
     
     % ---------------------------------------------------------------------
     % Save
     if ok
-        ds = reshape(ds, [size(ds,1) size(ds,2) size(ds,3) 1 size(ds,4)]);
-        if size(s,5) == 1
-            if all(optim)
-                ds = ds(:,:,:,:,1) + 1i * ds(:,:,:,:,2);
-            elseif optim(2)
-                ds = 1i * ds;
-            end
-            msk = true;
-        else
-            msk = optim;
+        if all(optim)
+            ds = ds(:,:,:,1) + 1i * ds(:,:,:,2);
+        elseif optim(2)
+            ds = 1i * ds;
         end
-        if centre_fields
-            for m=1:size(x,4)
-                s(:,:,:,m,msk) = s(:,:,:,m,msk) - beta(m) * armijo * ds;
-            end
-        else
-            s(:,:,:,n,msk) = s(:,:,:,n,msk) - armijo * ds;
-        end
+        s(:,:,:,n) = s(:,:,:,n) - armijo * ds;
     else
         llm = llm0;
         llp = llp0;
     end
         
-end
+end % < loop n
 
-end
-
-function llm = computellm(A, rho, x, s, ds, n, beta, optim)
-
-centre_fields = size(ds,4) == size(s,4);
-if centre_fields
-    beta = reshape(beta, [1 1 size(x,4)]);
-end
-
-llm = 0;
-for z=1:size(rho, 3) 
-
-    % ---------------------------------------------------------------------
-    % Load one slice of the complete coil dataset
-    if size(x, 5) == 2
-        % Two real components
-        x1 = reshape(single(x(:,:,z,:,:)), [], size(x,4), 2);
-        x1 = x1(:,:,1) + 1i*x1(:,:,2);
-    else
-        % One complex volume
-        x1 = reshape(single(x(:,:,z,:)), [], size(x,4));
-    end
-    if isa(A, 'gpuArray')
-        x1 = gpuArray(x1);
-    end
-
-    % ---------------------------------------------------------------------
-    % Load one slice of the mean
-    if size(rho, 5) == 2
-        % Two real components
-        rho1 = reshape(single(rho(:,:,z,:,:)), [], 1, 2);
-        rho1 = rho1(:,:,1) + 1i*rho1(:,:,2);
-    else
-        % One complex volume
-        rho1 = reshape(single(rho(:,:,z,:,:)), [], 1);
-    end
-    if isa(A, 'gpuArray')
-        rho1 = gpuArray(rho1);
-    end
-
-    % ---------------------------------------------------------------------
-    % Load one slice of the search direction + make it complex
-    if all(optim)
-        ds1 = reshape(single(ds(:,:,z,:)), [], 2);
-        ds1 = ds1(:,1) + 1i * ds1(:,2);
-    elseif optim(1)
-        ds1 = reshape(single(ds(:,:,z)), [], 1);
-    elseif optim(2)
-        ds1 = reshape(single(ds(:,:,z)) * 1i, [], 1);
-    end
-    if isa(A, 'gpuArray')
-        ds1 = gpuArray(ds1);
-    end
-    
-    % ---------------------------------------------------------------------
-    % Load one slice of the complete sensitivity dataset + correct
-    if size(s, 5) == 2
-        % Two real components
-        s1 = reshape(single(s(:,:,z,:,:)), [], size(x,4), 2);
-        s1 = s1(:,:,1) + 1i*s1(:,:,2);
-    else
-        % One complex volume
-        s1 = reshape(single(s(:,:,z,:,:)), [], size(x,4));
-    end
-    if isa(A, 'gpuArray')
-        s1 = gpuArray(s1);
-    end
-    if centre_fields
-        s1 = s1 - bsxfun(@times, beta, ds1);
-    else
-        s1(:,n) = s1(:,n) - ds1;
-    end
-    s1   = single(exp(double(s1)));
-    rho1 = bsxfun(@times, rho1, s1);
-    s1   = []; % clear
-
-    % ---------------------------------------------------------------------
-    % Compute log-likelihood
-    llm = llm - 0.5 * sum(double(real(dot((rho1 - x1) * A, rho1 - x1, 2))));
-
-end
-
-end % < function computellm
+end % < function multicoil_sensitivity

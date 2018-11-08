@@ -21,10 +21,16 @@ function rho = multicoil_mean_ml(x, s, A, rho, optim)
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
+lat = [size(x,1), size(x,2), size(x,3)];
+N   = size(x,4);
+gpu_on = isa(A, 'gpuArray');
+if gpu_on, loadarray = @loadarray_gpu;
+else,      loadarray = @loadarray_cpu; end
+
 % -------------------------------------------------------------------------
 % Allocate output volume
 if nargin < 4
-    rho = zeros(size(x,1), size(x,2), size(x,3), 1, size(x,5), 'single');
+    rho = zeros(lat, 'like', x);
 end
 if nargin < 5
     optim = [true true];
@@ -37,77 +43,44 @@ end
 
 % -------------------------------------------------------------------------
 % Process slice-wise to save memory
-for z=1:size(rho, 3) 
+for z=1:lat(3)
 
     % ---------------------------------------------------------------------
     % Load one slice of the complete coil dataset
-    if size(x, 5) == 2
-        % Two real components
-        x1 = reshape(single(x(:,:,z,:,:)), [], size(x,4), 2);
-        x1 = x1(:,:,1) + 1i*x1(:,:,2);
-    else
-        % One complex volume
-        x1 = reshape(single(x(:,:,z,:)), [], size(x,4));
-    end
-    if isa(A, 'gpuArray')
-        x1 = gpuArray(x1);
-    end
+    xz = loadarray(x(:,:,z,:), @single);
+    xz = reshape(xz, [], N);
 
     % ---------------------------------------------------------------------
-    % Load one slice of the complete bias dataset
-    if size(s, 5) == 2
-        % Two real components
-        s1 = reshape(single(s(:,:,z,:,:)), [], size(x,4), 2);
-        s1 = s1(:,:,1) + 1i*s1(:,:,2);
-    else
-        % One complex volume
-        s1 = reshape(single(s(:,:,z,:,:)), [], size(x,4));
-    end
-    s1 = single(exp(double(s1)));
-    if isa(A, 'gpuArray')
-        s1 = gpuArray(s1);
-    end
+    % Load one slice of the complete sensitivity dataset + correct
+    sz   = loadarray(s(:,:,z,:), @single);
+    sz   = reshape(sz, [], N);
+    sz   = single(exp(double(sz)));
 
     % ---------------------------------------------------------------------
     % Compute mean
     % rho = (s'*A*x) ./ (s'*A*s)
-    Ab = double(s1 * A);
-    rho1 = dot(Ab, double(x1), 2);
-    rho1 = rho1 ./ single(dot(Ab, double(s1), 2));
+    Ab = double(sz * A);
+    rhoz = dot(Ab, double(xz), 2);
+    rhoz = rhoz ./ single(dot(Ab, double(sz), 2));
     clear Ab
     
     if ~all(optim)
-        if size(rho, 5) == 2
-            % Two real components
-            rho0 = reshape(single(rho(:,:,z,:,:)), [], 2);
-            rho0 = rho0(:,1) + 1i*rho0(:,2);
-        else
-            % One complex volume
-            rho0 = reshape(single(rho(:,:,z,:)), [], 1);
-        end
-        if isa(A, 'gpuArray')
-            rho0 = gpuArray(rho0);
-        end
+         rho0 = loadarray(rho(:,:,z,:), @single);
+         rho0 = reshape(rho0, [], 1);
         if optim(1)
-            phi = angle(rho0);
-            mag = real(exp(-1i*phi).*rho1);
-            rho1 = mag .* exp(1i*phi);
+            phi  = angle(rho0); clear rh0
+            mag  = real(exp(-1i*phi).*rhoz);
+            rhoz = mag .* exp(1i*phi);
         else
             mag  = abs(rho0); clear rho0
-            phi  = real(-(1/1i)*log(mag./rho1));
-            rho1 = mag .* exp(1i*phi);
+            phi  = real(-(1/1i)*log(mag./rhoz));
+            rhoz = mag .* exp(1i*phi);
         end
+        clear mag phi
     end
-    
-    rho1 = reshape(rho1, [size(rho,1) size(rho,2)]);
     
     % ---------------------------------------------------------------------
     % Write slice
-    if size(rho, 5) == 2
-        rho(:,:,z,1,1) = real(rho1);
-        rho(:,:,z,1,2) = imag(rho1);
-    else
-        rho(:,:,z) = rho1;
-    end
+    rho(:,:,z) = reshape(rhoz, lat(1), lat(2));
 
 end
