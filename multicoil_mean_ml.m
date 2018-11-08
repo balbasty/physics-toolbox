@@ -57,12 +57,13 @@ for z=1:size(rho, 3)
     % Load one slice of the complete bias dataset
     if size(s, 5) == 2
         % Two real components
-        s1 = reshape(double(s(:,:,z,:,:)), [], size(x,4), 2);
-        s1 = single(exp(s1(:,:,1) + 1i*s1(:,:,2)));
+        s1 = reshape(single(s(:,:,z,:,:)), [], size(x,4), 2);
+        s1 = s1(:,:,1) + 1i*s1(:,:,2);
     else
         % One complex volume
-        s1 = reshape(single(exp(double(s(:,:,z,:,:)))), [], size(x,4));
+        s1 = reshape(single(s(:,:,z,:,:)), [], size(x,4));
     end
+    s1 = single(exp(double(s1)));
     if isa(A, 'gpuArray')
         s1 = gpuArray(s1);
     end
