@@ -49,11 +49,12 @@ for z=1:size(rho, 3)
     if size(s, 5) == 2
         % Two real components
         s1 = reshape(single(s(:,:,z,:,:)), [], size(x,4), 2);
-        s1 = single(exp(double(s1(:,:,1) + 1i*s1(:,:,2))));
+        s1 = s1(:,:,1) + 1i*s1(:,:,2);
     else
         % One complex volume
-        s1 = single(exp(double(reshape(single(s(:,:,z,:,:)), [], size(x,4)))));
+        s1 = reshape(single(s(:,:,z,:,:)), [], size(x,4));
     end
+    s1 = single(exp(double(s1)));
     if isa(A, 'gpuArray')
         s1 = gpuArray(s1);
     end
