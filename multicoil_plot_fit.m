@@ -37,10 +37,11 @@ else
 end
 if size(s,5) == 2
     s1 = double(s(:,:,z,n,:));
-    s1 = exp(s1(:,:,:,:,1) + 1i * s1(:,:,:,:,2));
+    s1 = s1(:,:,:,:,1) + 1i * s1(:,:,:,:,2);
 else
-    s1 = exp(double(s(:,:,z,n)));
+    s1 = double(s(:,:,z,n));
 end
+s1 = exp(s1);
 if size(x,5) == 2
     x1 = double(x(:,:,z,n,:));
     x1 = x1(:,:,:,:,1) + 1i * x1(:,:,:,:,2);
