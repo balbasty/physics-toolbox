@@ -38,7 +38,7 @@ for z=1:size(rho, 3)
         x1 = x1(:,:,:,:,1) + 1i * x1(:,:,:,:,2);
     else
         % One complex volume
-        x1 = single(x1(:,:,z,:,:));
+        x1 = single(x(:,:,z,:,:));
     end
     if isa(A, 'gpuArray')
         x1 = gpuArray(x1);
