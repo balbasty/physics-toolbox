@@ -291,7 +291,7 @@ for n=all_n
         % One complex volume
         if all(optim)
             s0 = single(s(:,:,:,n));
-            s0 = cat(4, real(s0), imag(s0));
+            s0 = cat(5, real(s0), imag(s0));
         elseif optim(1)
             s0 = real(single(s(:,:,:,n)));
         elseif optim(2)
