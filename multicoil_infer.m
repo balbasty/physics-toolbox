@@ -116,7 +116,7 @@ verbose       = p.Results.Verbose;
 llm           = p.Results.LLCond;
 llp           = p.Results.LLPrior;
 ll            = p.Results.LLPrev;
-% Nw            = p.Results.Parallel;
+Nw            = p.Results.Parallel;
 
 % -------------------------------------------------------------------------
 % Post-process input
@@ -285,7 +285,8 @@ for it=1:itermax
             'RegBoundary',   bnd, ...
             'VoxelSize',     vs, ...
             'SensOptim',     [optim_mag(1) optim_phase(1)], ...
-            'LLPrior',       llp);
+            'LLPrior',       llp, ...
+            'Parallel',      Nw);
         
         if verbose > 0
             if ok, fprintf(' :D (%d)\n', ls);

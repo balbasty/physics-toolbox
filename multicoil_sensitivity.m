@@ -155,10 +155,10 @@ if islogical(Nw)
     else,  Nw = 0;
     end
 end
-if Nw > 0
-    warning('Parallel processing not implemented. Running sequential instead.')
-    Nw = 0;
-end
+% if Nw > 0
+%     warning('Parallel processing not implemented. Running sequential instead.')
+%     Nw = 0;
+% end
 
 % -------------------------------------------------------------------------
 % Boundary condition (usually Neumann = null derivative)
@@ -177,8 +177,8 @@ function llm = computellm(n,ds)
     llm = 0;
     % ---------------------------------------------------------------------
     % Compute gradient slice-wise to save memory
-    % parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
-    for z=1:lat(3)          % < Uncomment for sequential processing
+    parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
+    % for z=1:lat(3)          % < Uncomment for sequential processing
 
         % -----------------------------------------------------------------
         % Enforce boundary condition -> needed with parfor
@@ -242,8 +242,8 @@ for n=all_n
     
     % ---------------------------------------------------------------------
     % Compute gradient slice-wise to save memory
-    % parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
-    for z=1:lat(3)          % < Uncomment for sequential processing
+    parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
+    % for z=1:lat(3)          % < Uncomment for sequential processing
 
         % -----------------------------------------------------------------
         % Enforce boundary condition -> needed with parfor
