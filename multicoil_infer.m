@@ -72,6 +72,7 @@ end
 
 % -------------------------------------------------------------------------
 % Parse input
+N = size(varargin{1},4);
 p = inputParser;
 p.FunctionName = 'multicoil_infer';
 p.addRequired('CoilImages',                  @isarray);
@@ -79,7 +80,7 @@ p.addParameter('SensMaps',      [],          @isarray);
 p.addParameter('MeanImage',     [],          @isarray);
 p.addParameter('Precision',     NaN,         @isnumeric);
 p.addParameter('RegStructure',  [0 0 1],     @(X) isnumeric(X) && numel(X) == 3);
-p.addParameter('RegCoilFactor', 1,           @isnumeric);
+p.addParameter('RegCoilFactor', 1/N,         @isnumeric);
 p.addParameter('RegCompFactor', 1E5,         @(X) isnumeric(X) && numel(X) <= 2);
 p.addParameter('RegBoundary',   1,           @isboundary);
 p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
