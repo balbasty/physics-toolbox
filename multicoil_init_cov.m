@@ -24,48 +24,47 @@ function [C,A] = multicoil_init_cov(x, gpu)
 if nargin < 4
     gpu = '';
 end
+gpu_on = strcmpi(gpu, 'gpu');
 
 % -------------------------------------------------------------------------
 % Allocate output array
 C = zeros(size(x,4), 'single');
-if strcmpi(gpu, 'gpu')
+if gpu_on
     C = gpuArray(C);
 end
+if gpu_on, loadarray = @loadarray_gpu;
+else,      loadarray = @loadarray_cpu; end
 
-fprintf('InitCov:');
-for n=1:size(x,4)
+N = size(x,4);
+ndigits = ceil(log10(N))+1;
+
+fprintf(['InitCov: %' num2str(ndigits) 's'], '');
+for n=1:N
     
-    fprintf(' %d', n);
+    fprintf([repmat('\b', [1 ndigits]) '%' num2str(ndigits) 'd'], n);
     
     % ---------------------------------------------------------------------
     % Load one coil image
-    if size(x, 5) == 2
-        % Two real components
-        x1 = reshape(single(x(:,:,:,n,:)), [], 2);
-        x1 = sqrt(sum(x1.^2,2));
-    else
-        % One complex volume
-        x1 = reshape(single(x(:,:,:,n)), [], 1);
-        x1 = abs(x1);
-    end
+    xn = loadarray(abs(x(:,:,:,1)), @single);
+    xn = reshape(xn, [], 1);
     
     % ---------------------------------------------------------------------
     % Compute histogram
-    xmax = max(x1,[],'omitnan');
-    xmin = min(x1,[],'omitnan');
-    c1 = linspace(xmin,xmax,129);
-    c1 = (c1(2:end)+c1(1:end-1))/2;
-    bw1 = (xmax - xmin)/128;
-    [x1,w1] = spm_imbasics('hist', double(x1), c1(:), 'KeepZero', false);
+    xmax = max(xn,[],'omitnan');
+    xmin = min(xn,[],'omitnan');
+    cn = linspace(xmin,xmax,129);
+    cn = (cn(2:end)+cn(1:end-1))/2;
+    bwn = (xmax - xmin)/128;
+    [xn,wn] = spm_imbasics('hist', double(xn), cn(:), 'KeepZero', false);
     clear c1
     
     % ---------------------------------------------------------------------
     % Fit Rician mixture
     
-    [PI,NU,SIG] = spm_rice_mixture(double(w1), double(x1), 2);
+    [PI,NU,SIG] = spm_rice_mixture(double(wn), double(xn), 2);
     if NU(1) == 0 && NU(2) == 0
-        [~,MU,A,PI] = spm_gmm(double(x1), 2, double(w1),...
-            'GaussPrior', {[],10,[],10},'BinWidth',bw1);
+        [~,MU,A,PI] = spm_gmm(double(xn), 2, double(wn),...
+            'GaussPrior', {[],10,[],10},'BinWidth',bwn);
         if MU(1) <= MU(2)
             C(n,n) = 1./A(1);
         else
