@@ -10,5 +10,9 @@ function s = multicoil_upsample_sensitivity(s, lat)
 % This function relies on Matlab's signal processing toolbox, and might
 % need a recent version of Matlab (>= 2016).
 
+lat0 = [size(s) 1];
+lat0 = lat0(1:3);
+
 s = dct(dct(dct(s, [], 1), [], 2), [], 3);
 s = idct(idct(idct(s, lat(1), 1), lat(2), 2), lat(3), 3);
+s = s * sqrt(prod(lat)*prod(lat0));
