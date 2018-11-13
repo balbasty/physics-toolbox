@@ -17,286 +17,322 @@ function dat = ismrmrd_read(fname, varargin)
 % set                  - Indices of sets to read
 % segment              - Indices of segments to read
 % subpart              - Specific cases ('autocalib'/'cartesian'/'caipi')
+%                        /!\ caipi is experimental
 %
 % OPTIONS (KEYWORDS)
 % ------------------
-% compact - Return a compact volume (= do not zero-fill)    [false]
-% maxmem  - Peak amount of RAM to use when reading          [500M]
+% layout - Output memory layout: ['box']/'expand'/'compact'
+%          * box:     crop input indices with no data
+%          * expand:  keep input indices (might use up a lot of memory)
+%          * compact: Do not store zeros (indices are not "right")
+% order  - Output dimensions ordering
+%          [{'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'ph' 'rp' 'st' 'sg'}]
 %
 % OUTPUT
 % ------
-% dat - A k-space volume. Dimensions (from most rapidly changing) are:
-%           1: channels
-%           2: readout samples
-%           3: first phase encoding direction
-%           4: second phase encoding direction
-%           5: averages
-%           6: slices
-%           7: contrasts or echoes
-%           8: repetitions
-%           9: sets
-%          10: segments
-
-% -------------------------------------------------------------------------
-% Prepare header information
-head = struct;
+% dat - A k-space volume.
 
 % -------------------------------------------------------------------------
 % Parse input arguments
+default_order = {'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'ph' 'rp' 'st' 'sg'};
 p = inputParser;
 p.FunctionName = 'ismrmrd_read';
-p.addParameter('channel',               Inf, @isnumeric);
-p.addParameter('readout',               Inf, @(X) isnumeric(X) || ischar(X));
-p.addParameter('kspace_encode_step_1',  Inf, @isnumeric);
-p.addParameter('kspace_encode_step_2',  Inf, @isnumeric);
-p.addParameter('average',               Inf, @isnumeric);
-p.addParameter('slice',                 Inf, @isnumeric);
-p.addParameter('contrast',              Inf, @isnumeric);
-p.addParameter('phase',                 Inf, @isnumeric);
-p.addParameter('repetition',            Inf, @isnumeric);
-p.addParameter('set',                   Inf, @isnumeric);
-p.addParameter('segment',               Inf, @isnumeric);
-p.addParameter('compact',             false, @islogical);
-p.addParameter('maxmem',                5E8, @islogical);
+p.addParameter('channel',               [],  @isnumeric);
+p.addParameter('readout',               [],  @(X) isnumeric(X) || ischar(X));
+p.addParameter('kspace_encode_step_1',  [],  @isnumeric);
+p.addParameter('kspace_encode_step_2',  [],  @isnumeric);
+p.addParameter('average',               [],  @isnumeric);
+p.addParameter('slice',                 [],  @isnumeric);
+p.addParameter('contrast',              [],  @isnumeric);
+p.addParameter('phase',                 [],  @isnumeric);
+p.addParameter('repetition',            [],  @isnumeric);
+p.addParameter('set',                   [],  @isnumeric);
+p.addParameter('segment',               [],  @isnumeric);
+p.addParameter('layout',           'expand', @ischar);
+p.addParameter('order',       default_order, @iscell);
 p.addParameter('subpart',                '', @ischar);
 p.parse(varargin{:});
-head.k1.out = p.Results.kspace_encode_step_1;
-head.k2.out = p.Results.kspace_encode_step_2;
-head.av.out = p.Results.average;
-head.sl.out = p.Results.slice;
-head.ct.out = p.Results.contrast;
-head.ph.out = p.Results.phase;
-head.rp.out = p.Results.repetition;
-head.st.out = p.Results.set;
-head.sg.out = p.Results.segment;
-head.rd.out = p.Results.readout;
-head.ch.out = p.Results.channel;
-compact     = p.Results.compact;
-maxmem      = p.Results.maxmem;
-subpart     = p.Results.subpart;
+k1_out = p.Results.kspace_encode_step_1;
+k2_out = p.Results.kspace_encode_step_2;
+av_out = p.Results.average;
+sl_out = p.Results.slice;
+ct_out = p.Results.contrast;
+ph_out = p.Results.phase;
+rp_out = p.Results.repetition;
+st_out = p.Results.set;
+sg_out = p.Results.segment;
+rd_out = p.Results.readout;
+ch_out = p.Results.channel;
+layout  = p.Results.layout;
+subpart = p.Results.subpart;
+order   = p.Results.order;
+
+flags_remove = {}; % Unused for now, might be useful?
+flags_out    = {}; % Unused for now, might be useful?
 
 % -------------------------------------------------------------------------
-% Read soft header
-infoh5   = h5info(fname, '/dataset/data');
-nlines   = infoh5.Dataspace.Size;
-fprintf('Read soft header\n');
-softhead = ismrmrd_xml(fname);
-
-head_limits = softhead.ismrmrdHeader.encoding.encodingLimits;
-
-head.k1.lim.min    = 1 + str2double(head_limits.kspace_encoding_step_1.minimum.get_data);
-head.k1.lim.max    = 1 + str2double(head_limits.kspace_encoding_step_1.maximum.get_data);
-head.k1.lim.center = 1 + str2double(head_limits.kspace_encoding_step_1.center.get_data);
-head.k2.lim.min    = 1 + str2double(head_limits.kspace_encoding_step_2.minimum.get_data);
-head.k2.lim.max    = 1 + str2double(head_limits.kspace_encoding_step_2.maximum.get_data);
-head.k2.lim.center = 1 + str2double(head_limits.kspace_encoding_step_2.center.get_data);
-head.av.lim.min    = 1 + str2double(head_limits.average.minimum.get_data);
-head.av.lim.max    = 1 + str2double(head_limits.average.maximum.get_data);
-head.av.lim.center = 1 + str2double(head_limits.average.center.get_data);
-head.sl.lim.min    = 1 + str2double(head_limits.slice.minimum.get_data);
-head.sl.lim.max    = 1 + str2double(head_limits.slice.maximum.get_data);
-head.sl.lim.center = 1 + str2double(head_limits.slice.center.get_data);
-head.ct.lim.min    = 1 + str2double(head_limits.contrast.minimum.get_data);
-head.ct.lim.max    = 1 + str2double(head_limits.contrast.maximum.get_data);
-head.ct.lim.center = 1 + str2double(head_limits.contrast.center.get_data);
-head.ph.lim.min    = 1 + str2double(head_limits.phase.minimum.get_data);
-head.ph.lim.max    = 1 + str2double(head_limits.phase.maximum.get_data);
-head.ph.lim.center = 1 + str2double(head_limits.phase.center.get_data);
-head.rp.lim.min    = 1 + str2double(head_limits.repetition.minimum.get_data);
-head.rp.lim.max    = 1 + str2double(head_limits.repetition.maximum.get_data);
-head.rp.lim.center = 1 + str2double(head_limits.repetition.center.get_data);
-head.st.lim.min    = 1 + str2double(head_limits.set.minimum.get_data);
-head.st.lim.max    = 1 + str2double(head_limits.set.maximum.get_data);
-head.st.lim.center = 1 + str2double(head_limits.set.center.get_data);
-head.sg.lim.min    = 1 + str2double(head_limits.segment.minimum.get_data);
-head.sg.lim.max    = 1 + str2double(head_limits.segment.maximum.get_data);
-head.sg.lim.center = 1 + str2double(head_limits.segment.center.get_data);
+% Read soft and hard headers
+fprintf('Read header\n');
+softHeader = ismrmrd_xml(fname);
+softHeader = softHeader.ismrmrdHeader;
+[hardHeader, nblines] = ismrmrd_read_member(fname, 'head');
+hardHeader = hardHeader.head;
 
 % -------------------------------------------------------------------------
-% Reading strategy
-dat1 = h5read(fname, '/dataset/data', 1, 1);
-linelength = numel(dat1.data{1});
-clear dat1
-linestep = floor(maxmem/(linelength*4));
+% Store limits along dimensions
+limits                = softHeader.encoding.encodingLimits;
+limits.samples.min    = 0;
+limits.samples.max    = max(hardHeader.number_of_samples) - 1;
+limits.samples.center = limits.samples.max/2;
+limits.channels.min   = 1;
+limits.channels.max   = max(hardHeader.available_channels);
 
 % -------------------------------------------------------------------------
-% Read available indices
-fprintf('Read hard header:   0%%');
-head.k1.smp = [];
-head.k2.smp = [];
-head.av.smp = [];
-head.sl.smp = [];
-head.ct.smp = [];
-head.ph.smp = [];
-head.rp.smp = [];
-head.st.smp = [];
-head.sg.smp = [];
-pct_prev    = 0;
-for i=1:linestep:nlines
-    pct = floor(100*i/nlines);
-    if pct ~= pct_prev
-        pct_prev = pct;
-        fprintf('\b\b\b\b%3d%%', pct);
-    end
-    nread       = min(linestep, nlines-i);
-    dat1        = h5read(fname, '/dataset/data', i, nread);
-    head.k1.smp = unique([head.k1.smp dat1.head.idx.kspace_encode_step_1(:)']);
-    head.k2.smp = unique([head.k2.smp dat1.head.idx.kspace_encode_step_2(:)']);
-    head.av.smp = unique([head.av.smp dat1.head.idx.average(:)']);
-    head.sl.smp = unique([head.sl.smp dat1.head.idx.slice(:)']);
-    head.ct.smp = unique([head.ct.smp dat1.head.idx.contrast(:)']);
-    head.ph.smp = unique([head.ph.smp dat1.head.idx.phase(:)']);
-    head.rp.smp = unique([head.rp.smp dat1.head.idx.repetition(:)']);
-    head.st.smp = unique([head.st.smp dat1.head.idx.set(:)']);
-    head.sg.smp = unique([head.sg.smp dat1.head.idx.segment(:)']);
-end
-fprintf('\n');
-% Convert to matlab 1-indices
-head.k1.smp = head.k1.smp + 1;
-head.k2.smp = head.k2.smp + 1;
-head.av.smp = head.av.smp + 1;
-head.sl.smp = head.sl.smp + 1;
-head.ct.smp = head.ct.smp + 1;
-head.ph.smp = head.ph.smp + 1;
-head.rp.smp = head.rp.smp + 1;
-head.st.smp = head.st.smp + 1;
-head.sg.smp = head.sg.smp + 1;
-
-% -------------------------------------------------------------------------
-% Read index range inside each line
-dat1            = h5read(fname, '/dataset/data', 1, 1);
-head.rd.nb      = dat1.head.number_of_samples;
-head.rd.lim.min = 1;
-head.rd.lim.max = head.rd.nb;
-head.rd.smp     = head.rd.lim.min:head.rd.lim.max;
-head.ch.nb      = dat1.head.available_channels;
-head.ch.lim.min = 1;
-head.ch.lim.max = head.ch.nb;
-head.ch.smp     = head.ch.lim.min:head.ch.lim.max;
+% Prepare mask of lines to read
+mask = ones(nblines, 1, 'logical');
 
 % -------------------------------------------------------------------------
 % Specific subparts
-switch subpart
-    case 'autocalib'
+switch lower(subpart)
+    case {'autocalib' 'ac'}
+        fprintf('Find autocalibration lines\n');
         try
+            idx_k1    = hardHeader.idx.kspace_encode_step_1;
+            centre_k1 = limits.kspace_encoding_step_1.centre;
+            idx_k2    = hardHeader.idx.kspace_encode_step_2;
+            centre_k2 = limits.kspace_encoding_step_2.centre;
+            
             ack1name       = 'EmbeddedRefLinesE1';
             ack2name       = 'EmbeddedRefLinesE2';
-            userparams     = {softhead.ismrmrdHeader.userParameters.userParameterLong.name};
-            userparams     = cellfun(@(x) char(x.get_data), userparams, 'UniformOutput', false);
-            uservalues     = {softhead.ismrmrdHeader.userParameters.userParameterLong.value};
-            head.k1.ac.nb  = str2double(uservalues{strcmpi(userparams,ack1name)}.get_data);
-            head.k2.ac.nb  = str2double(uservalues{strcmpi(userparams,ack2name)}.get_data);
-            head.k1.ac.min = head.k1.lim.center - head.k1.ac.nb/2;
-            head.k1.ac.max = head.k1.lim.center + head.k1.ac.nb/2 - 1;
-            head.k2.ac.min = head.k2.lim.center - head.k2.ac.nb/2;
-            head.k2.ac.max = head.k2.lim.center + head.k2.ac.nb/2 - 1;
-            head.k1.out    = head.k1.ac.min:head.k1.ac.max;
-            head.k2.out    = head.k2.ac.min:head.k2.ac.max;
+            userparams     = softHeader.userParameters.userParameterLong;
+            usernames      = cellfun(@(X) X.name,  userparams, 'UniformOutput', false);
+            uservalues     = cellfun(@(X) X.value, userparams);
+            ac_nblines_k1  = uservalues(strcmpi(usernames,ack1name));
+            ac_nblines_k2  = uservalues(strcmpi(usernames,ack2name));
+            
+            mask_k1 = idx_k1 >= centre_k1 - ac_nblines_k1/2 ...
+                    & idx_k1 <  centre_k1 + ac_nblines_k1/2;
+            mask_k2 = idx_k2 >= centre_k2 - ac_nblines_k2/2 ...
+                    & idx_k2 <  centre_k2 + ac_nblines_k2/2;
+            mask    = mask & mask_k1(:) & mask_k2(:);
         catch
+            error('Could not extract autocalibration lines');
         end
-    case 'cartesian'
-        try
-            head.k1.af  = str2double(softhead.ismrmrdHeader.encoding.parallelImaging.accelerationFactor.kspace_encoding_step_1.get_data);
-            head.k2.af  = str2double(softhead.ismrmrdHeader.encoding.parallelImaging.accelerationFactor.kspace_encoding_step_2.get_data);
-            head.k1.out = head.k1.lim.min:head.k1.af:head.k1.lim.max;
-            head.k2.out = head.k2.lim.min:head.k2.af:head.k2.lim.max;
-        catch
-        end
-end
-
-% -------------------------------------------------------------------------
-% Default indices
-if ischar(head.rd.out)
-    if strcmpi(head.rd.out(1), '/')
-        sub         = str2double(head.rd.out(2:end));
-        len         = head.rd.lim.max - head.rd.lim.min + 1;
-        keep        = ceil(len/sub);
-        skip        = floor((len-keep)/2);
-        head.rd.out = (head.rd.lim.min + skip):(head.rd.lim.min + skip + keep - 1);
-    else
-        head.rd.out = Inf;
-    end
-end
-if head.ch.out == Inf, head.ch.out = head.ch.smp; end
-if head.rd.out == Inf, head.rd.out = head.rd.smp; end
-if head.k1.out == Inf, head.k1.out = head.k1.smp; end
-if head.k2.out == Inf, head.k2.out = head.k2.smp; end
-if head.av.out == Inf, head.av.out = head.av.smp; end
-if head.sl.out == Inf, head.sl.out = head.sl.smp; end
-if head.ct.out == Inf, head.ct.out = head.ct.smp; end
-if head.ph.out == Inf, head.ph.out = head.ph.smp; end
-if head.rp.out == Inf, head.rp.out = head.rp.smp; end
-if head.st.out == Inf, head.st.out = head.st.smp; end
-if head.sg.out == Inf, head.sg.out = head.sg.smp; end
-
-% -------------------------------------------------------------------------
-% Allocate output
-compactdim = @(x) numel(x);
-expanddim  = @(x) x(end)-x(1)+1;
-function i = full2comp(x,y)
-    [i,~] = find(bsxfun(@eq, x, y)');
-    i = reshape(i, [], 1);
-end
-compactind = @full2comp;
-expandind  = @(x,y) reshape(x - y(1) + 1, [], 1);
-if compact, getdim = compactdim; getind = compactind;
-else,       getdim = expanddim;  getind = expandind;  end
-dim = [numel(head.ch.out)  numel(head.rd.out) ...
-       getdim(head.k1.out) getdim(head.k2.out) ...
-       numel(head.av.out)  numel(head.sl.out) ...
-       numel(head.ct.out)  numel(head.ph.out) ...
-       numel(head.rp.out)  numel(head.st.out) ...
-       numel(head.sg.out)];
-dat = zeros(dim, 'like', single(1i));
-
-% -------------------------------------------------------------------------
-% Populate output volume
-fprintf('Read data:   0%%');
-for i=1:linestep:nlines
-    pct = floor(100*i/nlines);
-    if pct ~= pct_prev
-        pct_prev = pct;
-        fprintf('\b\b\b\b%3d%%', pct);
-    end
-    nread       = min(linestep, nlines-i);
-    dat1 = h5read(fname, '/dataset/data', i, nread);
-    k11  = 1 + dat1.head.idx.kspace_encode_step_1(:);
-    k21  = 1 + dat1.head.idx.kspace_encode_step_2(:);
-    av1  = 1 + dat1.head.idx.average(:);
-    sl1  = 1 + dat1.head.idx.slice(:);
-    ct1  = 1 + dat1.head.idx.contrast(:);
-    ph1  = 1 + dat1.head.idx.phase(:);
-    rp1  = 1 + dat1.head.idx.repetition(:);
-    st1  = 1 + dat1.head.idx.set(:);
-    sg1  = 1 + dat1.head.idx.segment(:);
-    
-    includedind = {head.k1.out, head.k2.out, head.av.out, head.sl.out, head.ct.out, head.ph.out, head.rp.out, head.st.out, head.sg.out};
-    foundind    = {k11, k21, av1, sl1, ct1, ph1, rp1, st1, sg1};
-    isincluded  = @(x,y) any(bsxfun(@eq, reshape(x, [], 1), ...
-                                         reshape(y, 1, [])), 2);
-    msk = cellfun(isincluded, foundind, includedind, 'UniformOutput', false);
-    msk = all([msk{:}],2);
-    
-    line = cat(2, dat1.data{msk});
-    line = reshape(line, [2 head.rd.nb head.ch.nb sum(msk)]);
-    line = permute(line(1,:,:,:) + 1i*line(2,:,:,:), [3 2 4 1]);
-    
-    foundind = [k11, k21, av1, sl1, ct1, ph1, rp1, st1, sg1];
-    foundind = foundind(msk,:);
-    linind   = sub2ind(dim(3:end), ...
-                           getind(foundind(:,1),includedind{1}), ...
-                           getind(foundind(:,2),includedind{2}), ...
-                       compactind(foundind(:,3),includedind{3}), ...
-                       compactind(foundind(:,4),includedind{4}), ...
-                       compactind(foundind(:,5),includedind{5}), ...
-                       compactind(foundind(:,6),includedind{6}), ...
-                       compactind(foundind(:,7),includedind{7}), ...
-                       compactind(foundind(:,8),includedind{8}), ...
-                       compactind(foundind(:,9),includedind{9}));
         
-     dat(:,:,linind) = line(head.ch.out,head.rd.out,:);
-                   
+    case 'cartesian'
+        fprintf('Find cartesian lines\n');
+        try
+            idx_k1  = hardHeader.idx.kspace_encode_step_1;
+            min_k1  = limits.kspace_encoding_step_1.minimum;
+            max_k1  = limits.kspace_encoding_step_1.maximum;
+            idx_k2  = hardHeader.idx.kspace_encode_step_2;
+            min_k2  = limits.kspace_encoding_step_2.minimum;
+            max_k2  = limits.kspace_encoding_step_2.maximum;
+            af_k1   = softHeader.encoding.parallelImaging.accelerationFactor.kspace_encoding_step_1;
+            af_k2   = softHeader.encoding.parallelImaging.accelerationFactor.kspace_encoding_step_2;
+            
+            mask_k1 = ismember(idx_k1, min_k1:af_k1:max_k1);
+            mask_k2 = ismember(idx_k2, min_k2:af_k2:max_k2);
+            mask    = mask & mask_k1(:) & mask_k2(:);
+        catch
+            error('Could not extract cartesian lines');
+        end
+        
+    case 'caipi'
+        fprintf('Find CAIPI lines\n');
+        warning('CAIPI extraction was never tested.')
+        try
+            idx_k1 = hardHeader.idx.kspace_encode_step_1;
+            min_k1 = limits.kspace_encoding_step_1.minimum;
+            max_k1 = limits.kspace_encoding_step_1.maximum;
+            idx_k2 = hardHeader.idx.kspace_encode_step_2;
+            min_k2 = limits.kspace_encoding_step_2.minimum;
+            max_k2 = limits.kspace_encoding_step_2.maximum;
+            af_k1   = softHeader.encoding.parallelImaging.accelerationFactor.kspace_encoding_step_1;
+            af_k2   = softHeader.encoding.parallelImaging.accelerationFactor.kspace_encoding_step_2;
+
+            mask_even_k1 = ismember(idx_k1, min_k1:af_k1:max_k1);
+            mask_even_k2 = ismember(idx_k2, min_k2:2*af_k2:max_k2);
+            mask_odd_k1  = ismember(idx_k1, min_k1+1:af_k1:max_k1);
+            mask_odd_k2  = ismember(idx_k2, min_k2+2:2*af_k2:max_k2);
+            mask         = mask & ( (mask_even_k1(:) & mask_even_k2(:)) | ...
+                                    (mask_odd_k1(:)  & mask_odd_k2(:))  );
+        catch
+            error('Could not extract CAIPI lines');
+        end
 end
-fprintf('\n');
+
+% -------------------------------------------------------------------------
+% Select indices
+fprintf('Select lines\n');
+if ~isempty(k1_out)
+    mask = mask && reshape(ismember(hardHeader.idx.kspace_encode_step_1, k1_out), [], 1);
+end
+if ~isempty(k2_out)
+    mask = mask && reshape(ismember(hardHeader.idx.kspace_encode_step_2, k2_out), [], 1);
+end
+if ~isempty(av_out)
+    mask = mask && reshape(ismember(hardHeader.idx.average, av_out), [], 1);
+end
+if ~isempty(sl_out)
+    mask = mask && reshape(ismember(hardHeader.idx.slice, sl_out), [], 1);
+end
+if ~isempty(ct_out)
+    mask = mask && reshape(ismember(hardHeader.idx.contrast, ct_out), [], 1);
+end
+if ~isempty(ph_out)
+    mask = mask && reshape(ismember(hardHeader.idx.phase, ph_out), [], 1);
+end
+if ~isempty(rp_out)
+    mask = mask && reshape(ismember(hardHeader.idx.repetition, rp_out), [], 1);
+end
+if ~isempty(st_out)
+    mask = mask && reshape(ismember(hardHeader.idx.set, st_out), [], 1);
+end
+if ~isempty(sg_out)
+    mask = mask && reshape(ismember(hardHeader.idx.segment, sg_out), [], 1);
+end
+
+% -------------------------------------------------------------------------
+% Select flags
+flags = struct( ...
+    'ACQ_FIRST_IN_ENCODE_STEP1',                1, ...
+    'ACQ_LAST_IN_ENCODE_STEP1',                 2, ...
+    'ACQ_FIRST_IN_ENCODE_STEP2',                3, ...
+    'ACQ_LAST_IN_ENCODE_STEP2',                 4, ...
+    'ACQ_FIRST_IN_AVERAGE',                     5, ...
+    'ACQ_LAST_IN_AVERAGE',                      6, ...
+    'ACQ_FIRST_IN_SLICE',                       7, ...
+    'ACQ_LAST_IN_SLICE',                        8, ...
+    'ACQ_FIRST_IN_CONTRAST',                    9, ...
+    'ACQ_LAST_IN_CONTRAST',                    10, ...
+    'ACQ_FIRST_IN_PHASE',                      11, ...
+    'ACQ_LAST_IN_PHASE',                       12, ...
+    'ACQ_FIRST_IN_REPETITION',                 13, ...
+    'ACQ_LAST_IN_REPETITION',                  14, ...
+    'ACQ_FIRST_IN_SET',                        15, ...
+    'ACQ_LAST_IN_SET',                         16, ...
+    'ACQ_FIRST_IN_SEGMENT',                    17, ...
+    'ACQ_LAST_IN_SEGMENT',                     18, ...
+    'ACQ_IS_NOISE_MEASUREMENT',                19, ...
+    'ACQ_IS_PARALLEL_CALIBRATION',             20, ...
+    'ACQ_IS_PARALLEL_CALIBRATION_AND_IMAGING', 21, ...
+    'ACQ_IS_REVERSE',                          22, ...
+    'ACQ_IS_NAVIGATION_DATA',                  23, ...
+    'ACQ_IS_PHASECORR_DATA',                   24, ...
+    'ACQ_LAST_IN_MEASUREMENT',                 25, ...
+    'ACQ_IS_HPFEEDBACK_DATA',                  26, ...
+    'ACQ_IS_DUMMYSCAN_DATA',                   27, ...
+    'ACQ_IS_RTFEEDBACK_DATA',                  28, ...
+    'ACQ_IS_SURFACECOILCORRECTIONSCAN_DATA',   29, ...
+    'ACQ_USER1',                               57, ...
+    'ACQ_USER2',                               58, ...
+    'ACQ_USER3',                               59, ...
+    'ACQ_USER4',                               60, ...
+    'ACQ_USER5',                               61, ...
+    'ACQ_USER6',                               62, ...
+    'ACQ_USER7',                               63, ...
+    'ACQ_USER8',                               64);
+
+function X = flag_to_id(X)
+    if ischar(X), X = flags.(X); end
+end
+if ~isempty(flags_remove)
+    if ~iscell(flags_remove), flags_remove = {flags_remove}; end
+    flags_remove = cellfun(@flag_to_id, flags_remove);
+    mask = mask & reshape(~ismember(hardHeader.flags, flags_remove), [], 1);
+end
+if ~isempty(flags_out)
+    if ~iscell(flags_out), flags_out = {flags_out}; end
+    flags_out = cellfun(@flag_to_id, flags_out);
+    mask = mask & reshape(ismember(hardHeader.flags, flags_out), [], 1);
+end
+
+% -------------------------------------------------------------------------
+% Read selected lines from dataset
+fprintf('Read selected lines\n');
+dataLines  = ismrmrd_read_member(fname, {'data' 'head'}, find(mask));
+rd_size    = max(dataLines.head.number_of_samples);
+ch_size    = max(dataLines.head.available_channels);
+dataLines  = cat(2, dataLines.data{:});
+dataLines  = reshape(dataLines, 2, rd_size, ch_size, []);
+
+% -------------------------------------------------------------------------
+% Remove unwanted channels and samples 
+% + convert to complex
+% + orientation [ch rd other]
+fprintf('Select samples and channels\n');
+if isempty(rd_out), rd_out = 1:rd_size; else, rd_size = numel(rd_out); end
+if isempty(ch_out), ch_out = 1:ch_size; else, ch_size = numel(ch_out); end
+dataLines = dataLines(:,rd_out,ch_out,:);
+dataLines = permute(dataLines(1,:,:,:) + 1i * dataLines(2,:,:,:), [3 2 4 1]);
+
+% -------------------------------------------------------------------------
+% Allocate output + populate 
+fprintf('Format output\n');
+idx_out = cell(1,9); % < [k1 k2 av sl ct ph rp st sg]
+switch lower(layout)
+    case 'expand'
+        idx_out{1} = 1 + hardHeader.idx.kspace_encode_step_1(mask);
+        idx_out{2} = 1 + hardHeader.idx.kspace_encode_step_2(mask);
+        idx_out{3} = 1 + hardHeader.idx.average(mask);
+        idx_out{4} = 1 + hardHeader.idx.slice(mask);
+        idx_out{5} = 1 + hardHeader.idx.contrast(mask);
+        idx_out{6} = 1 + hardHeader.idx.phase(mask);
+        idx_out{7} = 1 + hardHeader.idx.repetition(mask);
+        idx_out{8} = 1 + hardHeader.idx.set(mask);
+        idx_out{9} = 1 + hardHeader.idx.segment(mask);
+    case 'box'
+        idx_out{1} = 1 + hardHeader.idx.kspace_encode_step_1(mask);
+        idx_out{2} = 1 + hardHeader.idx.kspace_encode_step_2(mask);
+        idx_out{3} = 1 + hardHeader.idx.average(mask);
+        idx_out{4} = 1 + hardHeader.idx.slice(mask);
+        idx_out{5} = 1 + hardHeader.idx.contrast(mask);
+        idx_out{6} = 1 + hardHeader.idx.phase(mask);
+        idx_out{7} = 1 + hardHeader.idx.repetition(mask);
+        idx_out{8} = 1 + hardHeader.idx.set(mask);
+        idx_out{9} = 1 + hardHeader.idx.segment(mask);
+        
+        idx_out{1} = 1 + idx_out{1} - min(idx_out{1});
+        idx_out{2} = 1 + idx_out{2} - min(idx_out{2});
+        idx_out{3} = 1 + idx_out{3} - min(idx_out{3});
+        idx_out{4} = 1 + idx_out{4} - min(idx_out{4});
+        idx_out{5} = 1 + idx_out{5} - min(idx_out{5});
+        idx_out{6} = 1 + idx_out{6} - min(idx_out{6});
+        idx_out{7} = 1 + idx_out{7} - min(idx_out{7});
+        idx_out{8} = 1 + idx_out{8} - min(idx_out{8});
+        idx_out{9} = 1 + idx_out{9} - min(idx_out{9});
+    case 'compact'
+        [idx_out{3},~] = find(bsxfun(@eq, hardHeader.idx.average(mask),    unique(hardHeader.idx.average(mask))'));
+        [idx_out{4},~] = find(bsxfun(@eq, hardHeader.idx.slice(mask),      unique(hardHeader.idx.slice(mask))'));
+        [idx_out{5},~] = find(bsxfun(@eq, hardHeader.idx.contrast(mask),   unique(hardHeader.idx.contrast(mask))'));
+        [idx_out{6},~] = find(bsxfun(@eq, hardHeader.idx.phase(mask),      unique(hardHeader.idx.phase(mask))'));
+        [idx_out{7},~] = find(bsxfun(@eq, hardHeader.idx.repetition(mask), unique(hardHeader.idx.repetition(mask))'));
+        [idx_out{8},~] = find(bsxfun(@eq, hardHeader.idx.set(mask),        unique(hardHeader.idx.set(mask))'));
+        [idx_out{9},~] = find(bsxfun(@eq, hardHeader.idx.segment(mask),    unique(hardHeader.idx.segment(mask))'));
+        switch lower(subpart)
+            case 'caipi'
+                error('Compact CAIPI not implemented yet')
+            otherwise
+                [idx_out{1},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_1(mask), unique(hardHeader.idx.kspace_encode_step_1(mask))'));
+                [idx_out{2},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_2(mask), unique(hardHeader.idx.kspace_encode_step_2(mask))'));
+        end
+    otherwise
+        error('Unknown layout %s', layout)
+end
+idx_out = cellfun(@(X) X(:), idx_out, 'UniformOutput', false);
+dim_out = [ch_size rd_size cellfun(@max, idx_out)];
+dat     = zeros(dim_out, 'like', dataLines);
+
+dat(:,:,sub2ind(dim_out(3:end), idx_out{:})) = dataLines;
+
+% Reorder dimensions
+permutation = zeros(1,numel(order));
+all_dim     = 1:11;
+for i=1:numel(order)
+    permutation(i) = find(strcmpi(order{i}, default_order), 1);
+end
+permutation = [permutation all_dim(~ismember(all_dim, permutation))];
+dat         = permute(dat, permutation);
 
 end
