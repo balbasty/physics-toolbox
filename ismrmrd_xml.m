@@ -1,21 +1,53 @@
-function [obj,s] = ismrmrd_xml(fname)
-% FORMAT obj = ismrmrd_xml(fname)
+function header = ismrmrd_xml(fname, schema)
+% FORMAT header = ismrmrd_xml(fname)
 %
 % Read the flexible header of an ismrmrd file into a structure
 
-xmlstring = h5read(fname, '/dataset/xml');
-xmlstring = xmlstring{1};
+% -------------------------------------------------------------------------
+% Read schema
+if nargin < 2
+    schema = '';
+end
+if ~isstruct(schema)
+    schema = ismrmrd_schema(schema);
+end
 
-s = xmlreadstring(xmlstring);
+% -------------------------------------------------------------------------
+% Read header
+if ischar(fname)
+    [~,~,ext] = fileparts(fname);
+    switch ext
+        case '.h5'
+            xmlstring = h5read(fname, '/dataset/xml');
+            xmlstring = xmlstring{1};
+            DOMnode   = xmlreadstring(xmlstring);
+        case '.xml'
+            DOMnode   = xmlread(fname);
+        otherwise 
+            DOMnode   = xmlreadstring(fname);
+    end
+elseif isa(fname, 'org.apache.xerces.dom.DeferredDocumentImpl')
+    DOMnode = fname;
+end
 
-obj = parseNode(s);
+% -------------------------------------------------------------------------
+% Parse header
+header = parseNode(DOMnode, schema);
 
-function node = parseNode(theNode)
+% =========================================================================
+function obj = parseNode(DOMnode, schema)
 % Recurse over node children.
 
-node = struct;
-if theNode.hasChildNodes
-    childNodes    = theNode.getChildNodes;
+nodeName   = char(DOMnode.getNodeName);
+
+if isfield(schema, 'parse') && ~isempty(schema.parse)
+    
+    % ---------------------------------------------------------------------
+    % Parsable value (= leaf)
+    
+    obj = [];
+    
+    childNodes    = DOMnode.getChildNodes;
     numChildNodes = childNodes.getLength;
     for c=1:numChildNodes
         theChild  = childNodes.item(c-1);
@@ -24,40 +56,92 @@ if theNode.hasChildNodes
             if ~isempty(char(theChild.getData))
                 switch childName(2:end)
                     case 'text'
-                        node.get_data = char(theChild.getData);
+                        value = schema.parse(theChild.getData);
+                        if isnumeric(value)
+                            obj(end+1) = value;
+                        else
+                            if isempty(obj)
+                                obj = {value};
+                            else
+                                obj{end+1} = value;
+                            end
+                        end
                     otherwise
                         warning('Unknown type %s',childName)
                 end
             end
             continue
         end
-        if ~isfield(node, childName)
-            idx = 1;
-        else
-            idx = numel(node.(childName)) + 1;
+    end
+    if isfield(schema, 'minOccurs')
+        if isfield(schema, 'default')
+            value = schema.parse(schema.default);
+            for i=1:(schema.minOccurs-numel(obj))
+                if isnumeric(value)
+                    obj(end+1) = value;
+                else
+                    if isempty(obj)
+                        obj = {value};
+                    else
+                        obj{end+1} = value;
+                    end
+                end
+            end
         end
-        childStruct = parseNode(theChild);
-        fields = fieldnames(childStruct);
-        for f=1:numel(fields)
-            field = fields{f};
-            node.(childName)(idx).(field) = childStruct.(field);
+        if numel(obj) < schema.minOccurs
+            warning('Not enough values');
         end
     end
-end
-node.get_attributes = parseAttributes(theNode);
-
-
-function attributes = parseAttributes(theNode)
-% Create attributes structure.
-
-attributes = containers.Map;
-if theNode.hasAttributes
-    attributeNodes = theNode.getAttributes;
-    numAttributes  = attributeNodes.getLength;
-    for c=1:numAttributes
-        theAttribute   = attributeNodes.item(c-1);
-        attributeName  = char(theAttribute.getName);
-        attributeValue = char(theAttribute.getValue);
-        attributes(attributeName) = attributeValue;
+    if isfield(schema, 'maxOccurs')
+        if numel(obj) > schema.maxOccurs
+            warning('Too many values for %s (%d/%d)', nodeName, numel(obj), schema.maxOccurs);
+            if iscell(obj)
+                obj = obj{1:schema.maxOccurs};
+            else
+                obj = obj(1:schema.maxOccurs);
+            end
+        end
     end
+    if numel(obj) == 1 && iscell(obj)
+        obj = obj{1};
+    end
+    
+else
+    
+    % ---------------------------------------------------------------------
+    % Non-parsable value (= node)
+    
+    obj = struct;
+
+    protected = {'type' 'parse' 'default' 'maxOccurs' 'minOccurs' ...
+                 'enumeration' 'fractionDigits' 'length' ...
+                 'maxExclusive' 'maxInclusive' 'maxLength' ...
+                 'minExclusive' 'minInclusive' 'minLength' ...
+                 'pattern' 'totalDigits'};
+             
+    fields        = fieldnames(schema);
+    childNodes    = DOMnode.getChildNodes;
+    numChildNodes = childNodes.getLength;
+    for c=1:numChildNodes
+        theChild  = childNodes.item(c-1);
+        childName = char(theChild.getNodeName);
+        
+        if any(strcmpi(childName, fields)) && ...
+           ~any(strcmpi(childName, protected))
+       
+            child = parseNode(theChild, schema.(childName));
+       
+            if ~isfield(obj, childName)
+                obj.(childName) = child;
+            else
+                if ~iscell(obj.(childName))
+                    obj.(childName) = {obj.(childName)};
+                end
+                obj.(childName){end+1} = child;
+            end
+       
+        end
+        
+    end
+    
 end
