@@ -169,31 +169,31 @@ end
 % Select indices
 fprintf('Select lines\n');
 if ~isempty(k1_out)
-    mask = mask & reshape(ismember(hardHeader.idx.kspace_encode_step_1, k1_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.kspace_encode_step_1, k1_out-1), [], 1);
 end
 if ~isempty(k2_out)
-    mask = mask & reshape(ismember(hardHeader.idx.kspace_encode_step_2, k2_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.kspace_encode_step_2, k2_out-1), [], 1);
 end
 if ~isempty(av_out)
-    mask = mask & reshape(ismember(hardHeader.idx.average, av_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.average, av_out-1), [], 1);
 end
 if ~isempty(sl_out)
-    mask = mask & reshape(ismember(hardHeader.idx.slice, sl_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.slice, sl_out-1), [], 1);
 end
 if ~isempty(ct_out)
-    mask = mask & reshape(ismember(hardHeader.idx.contrast, ct_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.contrast, ct_out-1), [], 1);
 end
 if ~isempty(ph_out)
-    mask = mask & reshape(ismember(hardHeader.idx.phase, ph_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.phase, ph_out-1), [], 1);
 end
 if ~isempty(rp_out)
-    mask = mask & reshape(ismember(hardHeader.idx.repetition, rp_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.repetition, rp_out-1), [], 1);
 end
 if ~isempty(st_out)
-    mask = mask & reshape(ismember(hardHeader.idx.set, st_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.set, st_out-1), [], 1);
 end
 if ~isempty(sg_out)
-    mask = mask & reshape(ismember(hardHeader.idx.segment, sg_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.segment, sg_out-1), [], 1);
 end
 
 % -------------------------------------------------------------------------
