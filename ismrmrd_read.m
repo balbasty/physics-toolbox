@@ -48,7 +48,7 @@ p.addParameter('phase',                 [],  @isnumeric);
 p.addParameter('repetition',            [],  @isnumeric);
 p.addParameter('set',                   [],  @isnumeric);
 p.addParameter('segment',               [],  @isnumeric);
-p.addParameter('layout',           'expand', @ischar);
+p.addParameter('layout',              'box', @ischar);
 p.addParameter('order',       default_order, @iscell);
 p.addParameter('subpart',                '', @ischar);
 p.parse(varargin{:});
