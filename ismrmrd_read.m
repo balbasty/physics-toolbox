@@ -115,6 +115,7 @@ switch lower(subpart)
             mask_k2 = idx_k2 >= centre_k2 - ac_nblines_k2/2 ...
                     & idx_k2 <  centre_k2 + ac_nblines_k2/2;
             mask    = mask & mask_k1(:) & mask_k2(:);
+            clear mask_k1 mask_k2
         catch
             error('Could not extract autocalibration lines');
         end
@@ -134,6 +135,7 @@ switch lower(subpart)
             mask_k1 = ismember(idx_k1, min_k1:af_k1:max_k1);
             mask_k2 = ismember(idx_k2, min_k2:af_k2:max_k2);
             mask    = mask & mask_k1(:) & mask_k2(:);
+            clear mask_k1 mask_k2 idx_k1 idx_k2 
         catch
             error('Could not extract cartesian lines');
         end
@@ -157,6 +159,7 @@ switch lower(subpart)
             mask_odd_k2  = ismember(idx_k2, min_k2+2:2*af_k2:max_k2);
             mask         = mask & ( (mask_even_k1(:) & mask_even_k2(:)) | ...
                                     (mask_odd_k1(:)  & mask_odd_k2(:))  );
+            clear mask_even_k1 mask_even_k2 mask_odd_k1 mask_odd_k2 idx_k1 idx_k2 
         catch
             error('Could not extract CAIPI lines');
         end
@@ -166,31 +169,31 @@ end
 % Select indices
 fprintf('Select lines\n');
 if ~isempty(k1_out)
-    mask = mask && reshape(ismember(hardHeader.idx.kspace_encode_step_1, k1_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.kspace_encode_step_1, k1_out), [], 1);
 end
 if ~isempty(k2_out)
-    mask = mask && reshape(ismember(hardHeader.idx.kspace_encode_step_2, k2_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.kspace_encode_step_2, k2_out), [], 1);
 end
 if ~isempty(av_out)
-    mask = mask && reshape(ismember(hardHeader.idx.average, av_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.average, av_out), [], 1);
 end
 if ~isempty(sl_out)
-    mask = mask && reshape(ismember(hardHeader.idx.slice, sl_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.slice, sl_out), [], 1);
 end
 if ~isempty(ct_out)
-    mask = mask && reshape(ismember(hardHeader.idx.contrast, ct_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.contrast, ct_out), [], 1);
 end
 if ~isempty(ph_out)
-    mask = mask && reshape(ismember(hardHeader.idx.phase, ph_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.phase, ph_out), [], 1);
 end
 if ~isempty(rp_out)
-    mask = mask && reshape(ismember(hardHeader.idx.repetition, rp_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.repetition, rp_out), [], 1);
 end
 if ~isempty(st_out)
-    mask = mask && reshape(ismember(hardHeader.idx.set, st_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.set, st_out), [], 1);
 end
 if ~isempty(sg_out)
-    mask = mask && reshape(ismember(hardHeader.idx.segment, sg_out), [], 1);
+    mask = mask & reshape(ismember(hardHeader.idx.segment, sg_out), [], 1);
 end
 
 % -------------------------------------------------------------------------
