@@ -31,8 +31,9 @@ rho1 = double(rho(:,:,z,:));
 
 % -------------------------------------------------------------------------
 % Magnitude
-subplot(2,3,1)
+p = subplot(2,3,1);
 h = imagesc(abs(rho1));
+caxis(p, [0 max(abs(rho1(:)))]);
 colormap(h.Parent, 'gray')
 daspect(h.Parent, vs);
 axis off
@@ -40,8 +41,9 @@ title('magnitude')
 
 % -------------------------------------------------------------------------
 % Phase
-subplot(2,3,2)
+p = subplot(2,3,2);
 h = imagesc(angle(rho1));
+caxis(p, [-pi pi]);
 colormap(h.Parent, phasemap(128));
 daspect(h.Parent, vs);
 axis off
@@ -49,8 +51,9 @@ title('phase')
 
 % -------------------------------------------------------------------------
 % Real
-subplot(2,3,4)
+p = subplot(2,3,4);
 h = imagesc(real(rho1));
+caxis(p, [min(real(rho1(:))) max(real(rho1(:)))]);
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -58,8 +61,9 @@ title('real')
 
 % -------------------------------------------------------------------------
 % Imag
-subplot(2,3,5)
+p = subplot(2,3,5);
 h = imagesc(imag(rho1));
+caxis(p, [min(imag(rho1(:))) max(imag(rho1(:)))]);
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -67,22 +71,25 @@ title('imag')
 
 % -------------------------------------------------------------------------
 % Covariance
-subplot(2,3,3)
+p = subplot(2,3,3);
 h = imagesc(C); colorbar
+caxis(p, [min(C(:)) max(C(:))]);
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, [1 1 1]);
 title('covariance')
 
 % -------------------------------------------------------------------------
 % Log-likelihood
-subplot(2,3,6)
-cla reset
-if size(ll,1) == 2
-    yyaxis right
-    plot(ll(2,:));
-    yyaxis left
+if ~isempty(ll)
+    subplot(2,3,6)
+    cla reset
+    if size(ll,1) == 2
+        yyaxis right
+        plot(ll(2,:));
+        yyaxis left
+    end
+    plot(ll(1,:));
+    title('log-likelihood')
 end
-plot(ll(1,:));
-title('log-likelihood')
 
 drawnow

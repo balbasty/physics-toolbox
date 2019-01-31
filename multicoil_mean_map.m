@@ -1,113 +1,374 @@
-function rho = multicoil_mean_map(x, s, A, rho, prm, vs)
+function [rho,llm,llp,ok,ls] = multicoil_mean_map(varargin)
 % Maximum a posteriori mean given a set of observed coil images, 
 % log-sensitivity profiles and a noise precision (= inverse covariance) 
 % matrix.
 %
-% FORMAT rho = multicoil_mean_map(x, s, A, (rho), ...)
+% FORMAT [mean, ...] = multicoil_mean_map(coils, sens, (mean), ...)
 %
-% x   - (File)Array [Nx Ny Nz Nc (2)] - Complex coil images
-% s   - (File)Array [Nx Ny Nz Nc (2)] - Complex log-sensitivity profiles
-% A   -       Array [Nc Nc]           - Noise precision matrix
-% rho - (File)Array [Nx Ny Nz  1 (2)] - Complex mean image
-% prm -
-% vs  -
+% REQUIRED
+% --------
+% coils  - (File)Array [Nx Ny Nz Nc] - Complex coil images
+% sens   - (File)Array [Nx Ny Nz Nc] - Complex log-sensitivity profiles
+%
+% OPTIONAL
+% --------
+% mean   - (File)Array [Nx Ny Nz]    - Complex mean image
+%
+% KEYWORD ARGUMENTS
+% ----------------- 
+% Precision     - Array [Nc Nc]    - Noise precision matrix        [eye(Nc)]
+% RegStructure  - [Abs Mem Ben]    - Regularisation structure      [0 1 0]
+% RegFactor     - Scalar           - Regularisation magnitude      [0=ML]
+% RegPartFactor - [Mag Phase]      - Reg modulator magnitude/phase [1 1]
+% RegBoundary   - Scalar | String  - Boundary condition            ['Neumann']
+% VoxelSize     - Vector [3]       - Voxel size                    [1 1 1]
+% LLPrior       - Scalar           - Previous prior log-likelihood [NaN]
+% PartOptim     - [Mag Phase]      - Optimise magnitude/phase      [true true]
+% Parallel      - Scalar | Logical - Number of parallel workers    [false]
+% SamplingMask  - Array [Nx Ny]    - Mask of the sampling scheme   [ones]
+%
+% OUTPUT
+% ------
+% mean - Updated mean
+% llm  - Log-likelihood of the matching term
+% llp  - Log-likelihood of the mean prior term
+% ok   - Did we improve?
+% ls   - Number of line-search steps used
 %
 % Nc = number of coils
-% Images can either be complex or have two real components that are then 
-% assumed to be the real and imaginary parts.
+% Nx = Phase encode 1 
+% Ny = Phase encode 2 /or/ Slice
+% Nz = Frequency readout
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
-if nargin < 6
-    vs = [1 1 1];
+% =========================================================================
+%
+%                       PARSE AND PROCESS ARGUMENTS
+%
+% =========================================================================
+
+% -------------------------------------------------------------------------
+% Helper functions to check input arguments
+% -------------------------------------------------------------------------
+function ok = isarray(X)
+    ok = isnumeric(X) || islogical(X) || isa(X, 'file_array');
+end
+function ok = isboundary(X)
+    ok = (isnumeric(X) && isscalar(X) && 0 <= X && X <= 1) || ...
+         (ischar(X)    && any(strcmpi(X, {'c','circulant','n','neumann'})));
+end
+function ok = isrealarray(X)
+    function okk = isrealtype(T)
+        okk = numel(T) > 7 || ~strcmpi(T(1:7),'complex');
+    end
+    if isa(X, 'file_array')
+        ok = all(cellfun(@isrealtype, {X.dtype}));
+    else
+        ok = isreal(X);
+    end
+end
+
+% -------------------------------------------------------------------------
+% Parse input
+% -------------------------------------------------------------------------
+p = inputParser;
+p.FunctionName = 'multicoil_mean_iter';
+p.addRequired('CoilImages',                  @isarray);
+p.addRequired('SensMaps',                    @isarray);
+p.addOptional('MeanImage',      [],          @isarray);
+p.addParameter('Precision',     1,           @isnumeric);
+p.addParameter('RegStructure',  [0 1 0],     @(X) isnumeric(X) && numel(X) == 3);
+p.addParameter('RegFactor',     0,           @(X) isnumeric(X) && isscalar(X));
+p.addParameter('RegPartFactor', 1,           @(X) isnumeric(X) && numel(X) <= 2);
+p.addParameter('RegBoundary',   1,           @isboundary);
+p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
+p.addParameter('LLPrior',       NaN,         @(X) isnumeric(X) && isscalar(X));
+p.addParameter('PartOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
+p.addParameter('Parallel',      0,           @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
+p.addParameter('SamplingMask',  1,           @isarray);
+p.parse(varargin{:});
+x           = p.Results.CoilImages;
+s           = p.Results.SensMaps;
+rho         = p.Results.MeanImage;
+A           = p.Results.Precision;
+prm         = p.Results.RegStructure;
+regfactor   = p.Results.RegFactor;
+regpart     = p.Results.RegPartFactor;
+bnd         = p.Results.RegBoundary;
+vs          = p.Results.VoxelSize;
+llp         = p.Results.LLPrior;
+optim       = p.Results.PartOptim;
+Nw          = p.Results.Parallel;
+mask        = p.Results.SamplingMask;
+
+% -------------------------------------------------------------------------
+% Post-process input
+% -------------------------------------------------------------------------
+Nc  = size(x,4);                        % Number of coils
+lat = [size(x,1) size(x,2) size(x,3)];  % Fully sampled lattice
+% Precision: default = identity
+if numel(A) == 1
+    A = A * eye(Nc);
+end
+% Reg components: just change reg structure
+regpart = padarray(regpart(:)', [0 max(0,2-numel(regpart))], 'replicate', 'post');
+% Boundary: convert to scalar representation
+switch bnd
+    case {0, 'c', 'circulant'}
+        bnd = 0;
+    case {1, 'n', 'neumann'}
+        bnd = 1;
+    otherwise
+        warning('Unknown boundary condition %s. Using Neumann instead', num2str(bnd))
+        bnd = 1;
+end
+% Voxel size: ensure row vector + complete
+vs = padarray(vs(:)', [0 max(0,3-numel(vs))], 'replicate', 'post');
+% Optimisation: if observed images are real, optim = [true false]
+% Reg components: just change reg structure
+optim = padarray(optim(:)', [0 max(0,2-numel(optim))], 'replicate', 'post');
+if isrealarray(x)
+    optim(2) = false;
+end
+optim = logical(optim);
+if all(~optim)
+    warning('Nothing to update')
+    return
+end
+% Parallel: convert to number of workers
+if islogical(Nw)
+    if Nw, Nw = inf;
+    else,  Nw = 0;
+    end
+end
+
+gpu_on = isa(A, 'gpuArray');
+if gpu_on, loadarray = @loadarray_gpu;
+else,      loadarray = @loadarray_cpu; end
+
+
+% =========================================================================
+%
+%                           COMPUTE DERIVATIVES
+%
+% =========================================================================
+
+% -------------------------------------------------------------------------
+% Compute log-likelihood (prior)
+% -------------------------------------------------------------------------
+if isnan(llp)
+    llp = multicoil_ll_mean_prior(rho, regfactor*prm, vs, regpart);
 end
 
 % -------------------------------------------------------------------------
 % Allocate gradient and Hessian
-g = zeros(size(rho,1),size(rho,2),size(rho,3),2,'single');
-H = zeros(size(rho,1),size(rho,2),size(rho,3),1,'single');
+% -------------------------------------------------------------------------
+g   = zeros([lat sum(optim)],'single');
+H   = zeros([lat 1],'single');
+llm = 0;
+
+propmask = sum(mask(:))/numel(mask);
 
 % -------------------------------------------------------------------------
 % Compute conditional part (slice-wise to save memory)
-for z=1:size(rho, 3) 
+% -------------------------------------------------------------------------
+% parfor (z=1:lat(3), Nw)
+for z=1:lat(3)
     
     % ---------------------------------------------------------------------
     % Load one slice of the complete coil dataset
-    if size(x, 5) == 2
-        % Two real components
-        x1 = reshape(single(x(:,:,z,:,:)), [], size(x,4), 2);
-        x1 = x1(:,:,1) + 1i*x1(:,:,2);
-    else
-        % One complex volume
-        x1 = reshape(single(x(:,:,z,:)), [], size(x,4));
-    end
-    if isa(A, 'gpuArray')
-        x1 = gpuArray(x1);
-    end
+    xz = loadarray(x(:,:,z,:), @double);
+    xz = reshape(xz, [], Nc);
 
     % ---------------------------------------------------------------------
-    % Load one slice of the mean
-    if size(rho, 5) == 2
-        % Two real components
-        rho1 = reshape(single(rho(:,:,z,:,:)), [], 2);
-        rho1 = rho1(:,1) + 1i*rho1(:,2);
-    else
-        % One complex volume
-        rho1 = reshape(single(rho(:,:,z,:)), [], 1);
-    end
-    if isa(A, 'gpuArray')
-        rho1 = gpuArray(rho1);
-    end
+    % Load one slice of the (previous) mean
+    rhoz = loadarray(rho(:,:,z,:), @double);
+    rhoz = reshape(rhoz, [], 1);
+
+    % ---------------------------------------------------------------------
+    % Load one slice of the complete sensitivity dataset + correct
+    sz   = loadarray(s(:,:,z,:), @double);
+    sz   = reshape(sz, [], Nc);
+    sz   = exp(sz);
+    rhoz = bsxfun(@times, rhoz, sz);
+
+    % ---------------------------------------------------------------------
+    % If incomplete sampling: push+pull coil-specific means
+    prhoz = multicoil_pushpullwrap(reshape(rhoz, [lat(1:2) 1 Nc]),mask);
+    prhoz = reshape(prhoz, [], Nc);
+        
+    llm = llm - 0.5 * prod(lat) * (...
+                          sum(real(dot(rhoz,prhoz*A,1))) ...
+                        - 2*sum(real(dot(rhoz,xz*A,1))));
+    rhoz = [];
     
-    % ---------------------------------------------------------------------
-    % Load one slice of the complete bias dataset
-    if size(s, 5) == 2
-        % Two real components
-        s1 = reshape(double(s(:,:,z,:,:)), [], size(x,4), 2);
-        s1 = single(exp(s1(:,:,1) + 1i*s1(:,:,2)));
-    else
-        % One complex volume
-        s1 = reshape(single(exp(double(s(:,:,z,:,:)))), [], size(x,4));
-    end
-    if isa(A, 'gpuArray')
-        s1 = gpuArray(s1);
-    end
-
     % ---------------------------------------------------------------------
     % Compute Hessian
-    tmp = real(dot(s1 * A, s1, 2));
-    H(:,:,z) = reshape(tmp, size(H,1), size(H,2));
+    tmp = propmask * prod(lat) * real(dot(sz, sz*A, 2));
+    H(:,:,z) = reshape(tmp, lat(1:2));
     
     % ---------------------------------------------------------------------
-    % Compute gradient
-    tmp =  rho1 .* tmp - dot(s1 * A, x1, 2);
-    g(:,:,z,1) = reshape(real(tmp), size(g,1), size(g,2));
-    g(:,:,z,2) = reshape(imag(tmp), size(g,1), size(g,2));
+    % Compute co-gradient
+    tmp = prod(lat) * dot(sz, (prhoz - xz)*A, 2);
+    gz  = zeros([size(tmp,1) sum(optim)], 'like' ,real(tmp(1)));
+    i   = 1;
+    if optim(1) % If optimise sensitivity magnitude
+        gz(:,i) = real(tmp);
+        i = i+1;
+    end
+    if optim(2) % If optimise sensitivity phase
+        gz(:,i) = imag(tmp);
+    end
+    g(:,:,z,:)  = reshape(gz, lat(1), lat(2), 1, []);
 
+    
+    gz    = [];
+    tmp   = [];
+    prhoz = [];
+end
+
+% -------------------------------------------------------------------------
+% Load previous value
+% -------------------------------------------------------------------------
+if all(optim)
+    rho0 = zeros([lat 2], 'single');
+    rho0(:,:,:,1) = real(single(rho));
+    rho0(:,:,:,2) = imag(single(rho));
+elseif optim(1)
+    rho0 = real(single(rho));
+elseif optim(2)
+    rho0 = imag(single(rho));
 end
 
 % -------------------------------------------------------------------------
 % Compute prior part
-if size(rho, 5) == 2
-    % Two real components
-    rho0 = single(rho(:,:,:,:,:));
-else
-    % One complex volume
-    rho0 = cat(5, single(real(rho(:,:,:,:,:))), single(imag(rho(:,:,:,:,:))));
+% -------------------------------------------------------------------------
+if regfactor > 0
+    g = g + spm_field('vel2mom', rho0, [vs regfactor*prm], regpart(optim));
 end
-g(:,:,:,1) = g(:,:,:,1) + spm_field('vel2mom', rho0(:,:,:,1,1), [vs prm]);
-g(:,:,:,2) = g(:,:,:,2) + spm_field('vel2mom', rho0(:,:,:,1,2), [vs prm]);
+
+% =========================================================================
+%
+%                           LINE SEARCH
+%
+% =========================================================================
 
 % -------------------------------------------------------------------------
 % Gauss-Newton
-rho0(:,:,:,1,1) = rho0(:,:,:,1,1) - spm_field('fmg', H, g(:,:,:,1), [vs prm 2 2]);
-rho0(:,:,:,1,2) = rho0(:,:,:,1,2) - spm_field('fmg', H, g(:,:,:,2), [vs prm 2 2]);
-
+% -------------------------------------------------------------------------
+drho = zeros(size(rho0), 'single');
+i = 1;
+if optim(1)
+    drho(:,:,:,i) = spm_field(H, g(:,:,:,i), [vs regfactor*prm 2 2], regpart(1));
+    i = i + 1;
+end
+if optim(2)
+    drho(:,:,:,i) = spm_field(H, g(:,:,:,i), [vs regfactor*prm 2 2], regpart(2));
+end
+clear g H
 
 % -------------------------------------------------------------------------
-% Write on disk
-if size(rho, 5) == 2
-    rho(:,:,:,:,:) = rho0;
+% Parts for log-likelihood (prior)
+% -------------------------------------------------------------------------
+if regfactor
+    Ldrho = spm_field('vel2mom', drho, [vs regfactor*prm], regpart(optim));
+    llp_part1 = double(reshape(rho0, 1, [])) * double(reshape(Ldrho, [], 1));
+    llp_part2 = double(reshape(drho, 1, [])) * double(reshape(Ldrho, [], 1));
+    clear Lds
 else
-    rho(:,:,:) = rho0(:,:,:,1,1) + 1i * rho0(:,:,:,1,2);
+    llp_part1 = 0;
+    llp_part2 = 0;
+end
+clear rho0
+
+if all(optim)
+    drho = drho(:,:,:,1) + 1i*drho(:,:,:,2);
+elseif optim(1)
+    drho = drho(:,:,:,1);
+elseif optim(2)
+    drho = 1i*drho(:,:,:,2);
+end
+
+% -------------------------------------------------------------------------
+% Line search
+% -------------------------------------------------------------------------
+llm0   = llm;
+llp0   = llp;
+armijo = 1;
+ok     = false;
+for ls=1:6
+    
+    % ---------------------------------------------------------------------
+    % Compute log-likelihood (prior)
+    llp = -0.5 * (armijo^2 * llp_part2 - 2 * armijo * llp_part1);
+    llp = llp0 + llp;
+
+    % ---------------------------------------------------------------------
+    % Compute log-likelihood (conditional)
+    llm = 0;
+    % parfor (z=1:lat(3), Nw)
+    for z=1:lat(3)
+    
+        % -----------------------------------------------------------------
+        % Load one slice of the complete coil dataset
+        xz = loadarray(x(:,:,z,:), @double);
+        xz = reshape(xz, [], Nc);
+
+        % -----------------------------------------------------------------
+        % Load one slice of the (previous) mean
+        rhoz = loadarray(rho(:,:,z,:), @double);
+        rhoz = reshape(rhoz, [], 1);
+        rhoz = rhoz - armijo*reshape(double(drho(:,:,z,:)), [], 1);
+
+        % -----------------------------------------------------------------
+        % Load one slice of the complete sensitivity dataset + correct
+        sz   = loadarray(s(:,:,z,:), @double);
+        sz   = reshape(sz, [], Nc);
+        sz   = exp(sz);
+        rhoz = bsxfun(@times, rhoz, sz);
+
+        % -----------------------------------------------------------------
+        % If incomplete sampling: push+pull coil-specific means
+        prhoz = multicoil_pushpullwrap(reshape(rhoz, [lat(1:2) 1 Nc]),mask);
+        prhoz = reshape(prhoz, [], Nc);
+
+        llm = llm - 0.5 * prod(lat) * (...
+                              sum(real(dot(rhoz,prhoz*A,1))) ...
+                            - 2*sum(real(dot(rhoz,xz*A,1))));
+        rhoz  = [];
+        prhoz = [];
+
+    end
+
+
+    % ---------------------------------------------------------------------
+    % Check progress
+    if (llm+llp) > (llm0+llp0)
+        ok = true;
+        break
+    else
+        armijo = armijo/2;
+    end
+    
+end
+
+% -------------------------------------------------------------------------
+% If line-search failed: roll back
+% -------------------------------------------------------------------------
+if ~ok
+    llm = llm0;
+    llp = llp0;
+end
+
+% =========================================================================
+%
+%                                 SAVE
+%
+% =========================================================================
+
+if ok
+    rho(:,:,:) = rho(:,:,:) - armijo * drho;
+end
+
 end

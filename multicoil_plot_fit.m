@@ -1,4 +1,4 @@
-function multicoil_plot_fit(n, x, s, rho, vs, figname, movie, it)
+function multicoil_plot_fit(n, x, s, rho, msk, vs, figname, movie, it)
 % FORMAT multicoil_plot_fit(n, x, s, rho, (vs), (figname))
 
 % -------------------------------------------------------------------------
@@ -9,14 +9,17 @@ addpath(fullfile(path, 'phasemap'));
 
 % -------------------------------------------------------------------------
 % Default parameters
-if nargin < 8
+if nargin < 9
     it = NaN;
-    if nargin < 7
+    if nargin < 8
         movie = '';
-        if nargin < 6
+        if nargin < 7
             figname = sprintf('Multicoil fit');
-            if nargin < 5
+            if nargin < 6
                 vs = [1 1 1];
+                if nargin < 5
+                    msk = 1;
+                end
             end
         end
     end
@@ -43,17 +46,19 @@ x1   = double(x(:,:,z,n));
 
 % -------------------------------------------------------------------------
 % Build images
-fit = s1.*rho1;
-res = x1 - fit;
+truefit   = s1.*rho1;
+foldedfit = multicoil_pushpullwrap(truefit,msk);
+res       = x1 - foldedfit;
 
-obsfit    = [x1 fit];
-obsfitres = [x1 fit res];
+obsfit    = [x1 foldedfit truefit];
+obsfitres = [x1 foldedfit res];
 
 
 % -------------------------------------------------------------------------
 % Magnitude
-subplot(2,2,1)
+p = subplot(2,2,1);
 h = imagesc(abs(obsfit));
+caxis(p, [0 max(abs(obsfit(:)))]);
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -64,8 +69,9 @@ title(strtitle)
 
 % -------------------------------------------------------------------------
 % Phase
-subplot(2,2,2)
+p = subplot(2,2,2);
 h = imagesc(angle(obsfit));
+caxis(p, [-pi pi]);
 colormap(h.Parent, phasemap(128));
 daspect(h.Parent, vs);
 axis off
@@ -76,8 +82,9 @@ title(strtitle)
 
 % -------------------------------------------------------------------------
 % Real
-subplot(2,2,3)
+p = subplot(2,2,3);
 h = imagesc(real(obsfitres));
+caxis(p, [min(real(obsfitres(:))) max(real(obsfitres(:)))]);
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -88,8 +95,9 @@ title(strtitle)
 
 % -------------------------------------------------------------------------
 % Real
-subplot(2,2,4)
+p = subplot(2,2,4);
 h = imagesc(imag(obsfitres));
+caxis(p, [min(imag(obsfitres(:))) max(imag(obsfitres(:)))]);
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
