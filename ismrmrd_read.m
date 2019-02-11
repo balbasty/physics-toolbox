@@ -330,6 +330,15 @@ switch lower(layout)
 end
 idx_out = cellfun(@(X) X(:), idx_out, 'UniformOutput', false);
 dim_out = [ch_size rd_size cellfun(@max, idx_out)];
+if strcmpi(layout, 'expand')
+    dim_out(2) = softHeader.encoding.encodedSpace.matrixSize.x;
+    dim_out(3) = softHeader.encoding.encodedSpace.matrixSize.y;
+    if unique(hardHeader.idx.slice) > 1
+        dim_out(6) = softHeader.encoding.encodedSpace.matrixSize.z;
+    else
+        dim_out(4) = softHeader.encoding.encodedSpace.matrixSize.z;
+    end
+end
 dat     = zeros(dim_out, 'like', dataLines);
 
 dat(:,:,sub2ind(dim_out(3:end), idx_out{:})) = dataLines;
