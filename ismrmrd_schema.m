@@ -270,7 +270,7 @@ function [parse, type] = parsefunc(type)
             case 'string',        parse = @char;
             case 'date',          parse = @(X) datetime(char(X), 'InputFormat', 'yyyy-MM-dd');
             case 'time',          parse = @(X) datetime(char(X), 'InputFormat', 'HH:mm:ss');
-            case 'base64Binary',  parse = @hex2dec;
+            case 'base64Binary',  parse = @base64decode;
             otherwise,            parse = @char;
         end
     else
