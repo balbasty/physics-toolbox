@@ -7,8 +7,8 @@ function dat = ismrmrd_read(fname, varargin)
 % --------------------------
 % channel              - Indices of channels to read
 % readout              - Indices of readout samples to read
-% kspace_encode_step_1 - Indices of first phase encoding dir 
-% kspace_encode_step_2 - Indices of second phase encoding dir 
+% kspace_encode_step_1 - Indices of first phase encoding dir to read
+% kspace_encode_step_2 - Indices of second phase encoding dir to read
 % average              - Indices of averages to read
 % slice                - Indices of slices to read
 % contrast             - Indices of contrasts/echoes to read
