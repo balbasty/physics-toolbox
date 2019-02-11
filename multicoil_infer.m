@@ -13,6 +13,7 @@ function [s,rho,A,ll,llm,llp] = multicoil_infer(varargin)
 % Precision     - Noise precision matrix                    [NaN=estimate]
 % RegCoilFactor - Regularisation factor per coil            [1]
 % RegCoilComp   - Regularisation factor per Re/Im component [1E5]
+% RegDecreaseFactor - Start with more regularisation        [4] (log10)
 % VoxelSize     - Voxel size                                [1 1 1]
 % SensOptim     - Optimize real and/or imaginary parts      [true true]
 % CovOptim      - Optimize noise covariance                 [false]
@@ -90,6 +91,7 @@ p.addParameter('Precision',     NaN,         @isnumeric);
 p.addParameter('RegStructure',  [0 0 1],     @(X) isnumeric(X) && numel(X) == 3);
 p.addParameter('RegCoilFactor', 1/N,         @isnumeric);
 p.addParameter('RegCompFactor', 1E5,         @(X) isnumeric(X) && numel(X) <= 2);
+p.addParameter('RegDecreaseFactor', 4,       @(X) isnumeric(X) && isscalar(X));
 p.addParameter('RegBoundary',   1,           @isboundary);
 p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('SensOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
@@ -111,6 +113,7 @@ A             = p.Results.Precision;
 reg           = p.Results.RegStructure;
 alpha         = p.Results.RegCoilFactor;
 gamma         = p.Results.RegCompFactor;
+decfactor     = p.Results.RegDecreaseFactor;
 bnd           = p.Results.RegBoundary;
 vs            = p.Results.VoxelSize;
 optim_cov     = p.Results.CovOptim;
@@ -155,6 +158,11 @@ if isempty(s)
     init_s = true;
 end
 
+% Decreasing regularisation
+decfactor0 = decfactor;
+decfactor  = linspace(decfactor0, 0, itermax)';
+decfactor  = 10.^decfactor;
+gammafinal = gamma;
 
 % =========================================================================
 %
@@ -224,12 +232,12 @@ end
 
 if isnan(llp)
     % > Initial log-likelihood (prior term)
-    llp = multicoil_ll_prior(s, reg, gamma, alpha, bnd, optim, vs);
+    llp = multicoil_ll_prior(s, reg, gammafinal.*decfactor(1), alpha, bnd, optim, vs);
 end
 if isnan(llm)
     % > Initial log-likelihood (cond term)
     llm = multicoil_ll_cond(x,s,rho,A) ...
-        - size(x,1)*size(x,2)*size(x,3)*ldC;
+        - sum(mask(:))/numel(mask)*size(x,1)*size(x,2)*size(x,3)*ldC;
 end
 % ll = [ll (llm+llp)];
 
@@ -242,8 +250,14 @@ end
 % -------------------------------------------------------------------------
 for it=1:itermax
     
+    gamma = gammafinal .* decfactor(it);
+    if it > 1
+        llp = llp * decfactor(it) / decfactor(it-1);
+    end
+    
     if verbose > -1
-        fprintf('Iteration %d\n', it);
+        fprintf('Iteration %d\n * reg magnitude = %3e\n * reg phase     = %3e\n', ...
+                it, gamma(1), gamma(2));
     end
     
 %     % ---------------------------------------------------------------------
@@ -274,36 +288,14 @@ for it=1:itermax
         llm = 0;
     end
     for n=1:N
-        
-        % -----------------------------------------------------------------
-        % Update mean (Gauss-Newton)
-        % -----------------------------------------------------------------
-%         if verbose > 0
-%             fprintf('> Update mean');
-%         end
-%         [rho,~,~,ok,ls] = multicoil_mean_map(...
-%             x, s, rho, ...
-%             'Precision',    A, ...
-%             'RegFactor',    0, ...
-%             'VoxelSize',    vs, ...
-%             'SamplingMask', mask);
-%         if verbose > 0
-%             if ok, fprintf(' :D (%d)\n', ls);
-%             else,  fprintf(' :(\n')
-%             end
-%         end
-%         if verbose > 1
-%             multicoil_plot_mean(rho, C, ll, vs);
-%         end
-        
-        if verbose > 1
-            % multicoil_plot_mean(rho, C, ll, vs);
-            multicoil_plot_fit(n, x, s, rho, mask, vs)
-        end
-        
+                
         % -----------------------------------------------------------------
         % Update sensitivity (Gauss-Newton)
         % -----------------------------------------------------------------
+        
+        if verbose > 1
+            multicoil_plot_fit(n, x, s, rho, mask, vs)
+        end
         if verbose > 0
             fprintf('> Update Sensitivity: %2d', n);
         end
@@ -333,7 +325,6 @@ for it=1:itermax
         
         if verbose > 1
             multicoil_plot_fit(n, x, s, rho, mask, vs)
-            % , '', sprintf('test/brain/fit_movie_%d.gif', n)
         end
         
     end
@@ -373,6 +364,7 @@ for it=1:itermax
             'Precision',    A, ...
             'RegFactor',    0, ...
             'VoxelSize',    vs, ...
+            'Parallel',     Nw, ...
             'SamplingMask', mask);
         if verbose > 0
             if ok, fprintf(' :D (%d)\n', ls);
@@ -419,11 +411,6 @@ for it=1:itermax
             end
             break
         end
-    end
-    
-    % TEST: decrease regularisation every 5 iterations
-    if mod(it,5) == 0
-        gamma = gamma./10;
     end
     
 end
