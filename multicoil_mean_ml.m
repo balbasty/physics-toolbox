@@ -43,7 +43,7 @@ end
 
 % -------------------------------------------------------------------------
 % Process slice-wise to save memory
-for z=1:lat(3)
+parfor(z=1:lat(3), 15)
 
     % ---------------------------------------------------------------------
     % Load one slice of the complete coil dataset
@@ -59,24 +59,25 @@ for z=1:lat(3)
     % ---------------------------------------------------------------------
     % Compute mean
     % rho = (s'*A*x) ./ (s'*A*s)
-    Ab = double(sz * A);
+    Ab   = double(sz * A);
     rhoz = dot(Ab, double(xz), 2);
     rhoz = rhoz ./ single(dot(Ab, double(sz), 2));
-    clear Ab
+    Ab   = []
     
     if ~all(optim)
-         rho0 = loadarray(rho(:,:,z,:), @single);
+         rho0 = loadarray(rho(:,:,z), @single);
          rho0 = reshape(rho0, [], 1);
         if optim(1)
-            phi  = angle(rho0); clear rh0
+            phi  = angle(rho0); rh0 = [];
             mag  = real(exp(-1i*phi).*rhoz);
             rhoz = mag .* exp(1i*phi);
         else
-            mag  = abs(rho0); clear rho0
+            mag  = abs(rho0); rho0 = []
             phi  = real(-(1/1i)*log(mag./rhoz));
             rhoz = mag .* exp(1i*phi);
         end
-        clear mag phi
+        mag = [];
+        phi = [];
     end
     
     % ---------------------------------------------------------------------

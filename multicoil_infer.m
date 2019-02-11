@@ -13,14 +13,13 @@ function [s,rho,A,ll,llm,llp] = multicoil_infer(varargin)
 % Precision     - Noise precision matrix                    [NaN=estimate]
 % RegCoilFactor - Regularisation factor per coil            [1]
 % RegCoilComp   - Regularisation factor per Re/Im component [1E5]
+% RegDecreaseFactor - Start with more regularisation        [4] (log10)
 % VoxelSize     - Voxel size                                [1 1 1]
 % SensOptim     - Optimize real and/or imaginary parts      [true true]
 % CovOptim      - Optimize noise covariance                 [false]
 % Tolerance     - Convergence threshold                     [1E-3]
 % IterMax       - Total maximum number of iterations        [100]
-% SubIterMax    - Maximum number of iterations / sub-loop   [15]
 % IterMin       - Total minimum number of iterations        [1]
-% SubIterMin    - Minimum number of iterations / sub-loop   [1]
 % Verbose       - (-1=quiet,0=moderate,1=verbose,2=plot)    [0]
 %
 % ADVANCED
@@ -41,19 +40,28 @@ function [s,rho,A,ll,llm,llp] = multicoil_infer(varargin)
 % prec - Noise precision        -       Array [Nc Nc]
 % ll   - Log-likelihood
 %
-% Nc = number of coils
-% Images can either be complex or have two real components that are then 
-% assumed to be the real and imaginary parts.
 % An output FileArray can be provided by using `MeanImage` as an input. If  
 % not provided, the output volume will have the same format as the input  
 % coil volume.
+%
+% Nc = number of coils
+% Nx = Phase encode 1 
+% Ny = Phase encode 2 /or/ Slice
+% Nz = Frequency readout
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
+% =========================================================================
+%
+%                       PARSE AND PROCESS ARGUMENTS
+%
+% =========================================================================
+
 % -------------------------------------------------------------------------
 % Helper functions to check input arguments
+% -------------------------------------------------------------------------
 function ok = isarray(X)
-    ok = isnumeric(X) || isa(X, 'file_array');
+    ok = isnumeric(X) || islogical(X) || isa(X, 'file_array');
 end
 function ok = isboundary(X)
     ok = (isnumeric(X) && isscalar(X) && 0 <= X && X <= 1) || ...
@@ -72,6 +80,7 @@ end
 
 % -------------------------------------------------------------------------
 % Parse input
+% -------------------------------------------------------------------------
 N = size(varargin{1},4);
 p = inputParser;
 p.FunctionName = 'multicoil_infer';
@@ -82,6 +91,7 @@ p.addParameter('Precision',     NaN,         @isnumeric);
 p.addParameter('RegStructure',  [0 0 1],     @(X) isnumeric(X) && numel(X) == 3);
 p.addParameter('RegCoilFactor', 1/N,         @isnumeric);
 p.addParameter('RegCompFactor', 1E5,         @(X) isnumeric(X) && numel(X) <= 2);
+p.addParameter('RegDecreaseFactor', 4,       @(X) isnumeric(X) && isscalar(X));
 p.addParameter('RegBoundary',   1,           @isboundary);
 p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('SensOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
@@ -89,13 +99,12 @@ p.addParameter('CovOptim',      false,       @(X) (isnumeric(X) || islogical(X))
 p.addParameter('Parallel',      0,           @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.addParameter('Tolerance',     1E-3,        @(X) isnumeric(X) && isscalar(X));
 p.addParameter('IterMax',       100,         @(X) isnumeric(X) && isscalar(X));
-p.addParameter('SubIterMax',    10,          @(X) isnumeric(X) && isscalar(X));
 p.addParameter('IterMin',       1,           @(X) isnumeric(X) && isscalar(X));
-p.addParameter('SubIterMin',    1,           @(X) isnumeric(X) && isscalar(X));
 p.addParameter('LLCond',        NaN,         @(X) isnumeric(X) && isscalar(X));
 p.addParameter('LLPrior',       NaN,         @(X) isnumeric(X) && isscalar(X));
 p.addParameter('LLPrev',        [],          @(X) isnumeric(X));
 p.addParameter('Verbose',       0,           @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
+p.addParameter('SamplingMask', [],           @isarray);
 p.parse(varargin{:});
 rho           = p.Results.MeanImage;
 x             = p.Results.CoilImages;
@@ -104,23 +113,24 @@ A             = p.Results.Precision;
 reg           = p.Results.RegStructure;
 alpha         = p.Results.RegCoilFactor;
 gamma         = p.Results.RegCompFactor;
+decfactor     = p.Results.RegDecreaseFactor;
 bnd           = p.Results.RegBoundary;
 vs            = p.Results.VoxelSize;
 optim_cov     = p.Results.CovOptim;
 optim         = p.Results.SensOptim;
 tol           = p.Results.Tolerance;
 itermax       = p.Results.IterMax;
-subitermax    = p.Results.SubIterMax;
 itermin       = p.Results.IterMin;
-subitermin    = p.Results.SubIterMin;
 verbose       = p.Results.Verbose;
 llm           = p.Results.LLCond;
 llp           = p.Results.LLPrior;
 ll            = p.Results.LLPrev;
 Nw            = p.Results.Parallel;
+mask          = p.Results.SamplingMask;
 
 % -------------------------------------------------------------------------
 % Post-process input
+% -------------------------------------------------------------------------
 N = size(x,4);
 
 % Precision: default = estimate from magnitude
@@ -137,52 +147,53 @@ alpha = padarray(alpha(:), [max(0,N-numel(alpha)) 0], 'replicate', 'post');
 gamma = gamma * sum(alpha);
 alpha = alpha/sum(alpha);
 % Allocate mean
+init_rho = false;
 if isempty(rho)
     rho = zeros(size(x,1),size(x,2),size(x,3), 'like', x);
+    init_rho = true;
 end
+init_s = false;
 if isempty(s)
     s = zeros(size(x,1),size(x,2),size(x,3),N,'like',x);
+    init_s = true;
 end
 
-% -------------------------------------------------------------------------
-% Hierarchical optimisation
-% > This can be used to start with a large regularization and decrease it
-%   iteratively. It is hard to choose an optimal scheme in terms of
-%   convergence/speed/local minima, so it is not used for now.
-%   This should probably be option-based anyway.
+% Decreasing regularisation
+decfactor0 = decfactor;
+decfactor  = linspace(decfactor0, 0, itermax)';
+decfactor  = 10.^decfactor;
+gammafinal = gamma;
 
-% Set hierarchical scheme
-optim_cov   =     [1] * optim_cov;
-optim_mag   =     [1] * optim(1);
-optim_phase =     [1] * optim(2);
-gamma_mag   = 10.^[0] * gamma(1);
-gamma_phase = 10.^[0] * gamma(2);
-tol         = 10.^[0] * tol;
-
-% Remove consecutive repeated combinations to save time
-prm = [optim_cov ; optim_mag ; optim_phase ; gamma_mag ; gamma_phase ; tol];
-prm(:,all(diff(prm,1,2) == 0)) = [];
-
-optim_cov   = prm(1,:);
-optim_mag   = prm(2,:);
-optim_phase = prm(3,:);
-gamma_mag   = prm(4,:);
-gamma_phase = prm(5,:);
-tol         = prm(6,:);
-stop        = zeros(1,numel(tol));
-stop(end)   = 1;
+% =========================================================================
+%
+%                           INITIAL ESTIMATES
+%
+% =========================================================================
 
 % -------------------------------------------------------------------------
 % Time execution
+% -------------------------------------------------------------------------
 if verbose > -1
     fprintf('Processing started\n');
     start = tic;
 end
 
 % -------------------------------------------------------------------------
-% Initial estimates
-rho = multicoil_mean_ml(x, s, A, rho, [optim_mag(1) optim_phase(1)]);
+% Compute log-determinant of precision matrix
+% -------------------------------------------------------------------------
+C   = inv(A);
+ldC = spm_matcomp('LogDet', C);
 
+% -------------------------------------------------------------------------
+% Initial estimate of the mean
+% -------------------------------------------------------------------------
+if init_rho
+    rho = multicoil_mean_ml(x, s, A, rho, optim);
+end
+
+% -------------------------------------------------------------------------
+% Initial estimate of the sensitivity phase
+% -------------------------------------------------------------------------
 % Phase is periodic, and phase wraps should not be penalised. However,
 % periodic domains are not handled by spm_field, which deals with
 % regularization. To circumvent this issue, I try to never wrap the phase.
@@ -193,29 +204,42 @@ rho = multicoil_mean_ml(x, s, A, rho, [optim_mag(1) optim_phase(1)]);
 % differences between the mean and the coil image.
 % See: * Bishop's PRML - chapter 2.3.8
 %      * https://en.wikipedia.org/wiki/Von_Mises_distribution
-if optim(2)
-    % Let's do a few iterations of those too centre the mean image.
-    for i=1:5
-        s   = multicoil_init_phase(rho, x, s);
-        rho = multicoil_mean_ml(x, s, A, rho, [optim_mag(1) optim_phase(1)]);
+% Let's do a few iterations of those to centre the mean image.
+if init_s
+    for i=1:3
+        if verbose > 0
+            fprintf('> Init sensitivity\n');
+        end
+        if optim(1)
+            s   = multicoil_init_magnitude(rho, x, s);
+        end
+        if optim(2)
+            s   = multicoil_init_phase(rho, x, s);
+        end
+
+        if init_rho
+            if verbose > 0
+                fprintf('> Update mean\n');
+            end
+            rho = multicoil_mean_ml(x, s, A, rho, optim);
+        end
     end
 end
 
-% Compute log-determinant of precision matrix
-C   = inv(A);
-ldC = spm_matcomp('LogDet', C);
+% -------------------------------------------------------------------------
+% Log-likelihood
+% -------------------------------------------------------------------------
 
 if isnan(llp)
     % > Initial log-likelihood (prior term)
-    llp = multicoil_ll_prior(s, reg, [gamma_mag(1) gamma_phase(1)], ...
-                             alpha, bnd, [optim_mag(1) optim_phase(1)], vs);
+    llp = multicoil_ll_prior(s, reg, gammafinal.*decfactor(1), alpha, bnd, optim, vs);
 end
 if isnan(llm)
     % > Initial log-likelihood (cond term)
     llm = multicoil_ll_cond(x,s,rho,A) ...
-        - size(x,1)*size(x,2)*size(x,3)*ldC;
+        - sum(mask(:))/numel(mask)*size(x,1)*size(x,2)*size(x,3)*ldC;
 end
-ll = [ll (llm+llp)];
+% ll = [ll (llm+llp)];
 
 if verbose > 1
     multicoil_plot_mean(rho, C, ll, vs);
@@ -223,72 +247,76 @@ end
 
 % -------------------------------------------------------------------------
 % Loop
-it0    = 0;     % > First iteration used to compute gain denominator
-upprm  = true;  % > Did we just update parameters?
+% -------------------------------------------------------------------------
 for it=1:itermax
     
-    % ---------------------------------------------------------------------
-    % Update parameters
-    if upprm
-        upprm = false;
-        if verbose > 0
-            fprintf('Update parameter values:\n');
-            fprintf('- Optim covariance: %d\n', optim_cov(1));
-            fprintf('- Optim magnitude:  %d\n', optim_mag(1));
-            fprintf('- Optim phase:      %d\n', optim_phase(1));
-            fprintf('- Regularisation:   [%g %g %g]\n', reg);
-            fprintf('- Reg magnitude:    %g\n', gamma_mag(1));
-            fprintf('- Reg phase:        %g\n', gamma_phase(1));
-            fprintf('- Tolerance:        %g\n', tol(1));
-        end
-    end
-    if verbose > -1
-        fprintf('Iteration %d | Sub-iteration %d\n', it, it-it0);
+    gamma = gammafinal .* decfactor(it);
+    if it > 1
+        llp = llp * decfactor(it) / decfactor(it-1);
     end
     
-    % ---------------------------------------------------------------------
-    % Update mean/covariance (closed-form)
-    if optim_cov(1)
-        if verbose > 0
-            fprintf('> Update Covariance\n');
-        end
-        rho     = multicoil_mean_ml(x, s, A, rho, [optim_mag(1) optim_phase(1)]);
-        [C,A]   = multicoil_cov(rho, x, s);
-        ldC = spm_matcomp('LogDet', C);
-        if verbose > 1
-            multicoil_plot_mean(rho, C, ll, vs);
-        end
+    if verbose > -1
+        fprintf('Iteration %d\n * reg magnitude = %3e\n * reg phase     = %3e\n', ...
+                it, gamma(1), gamma(2));
     end
+    
+%     % ---------------------------------------------------------------------
+%     % Update mean/covariance (closed-form)
+%     % ---------------------------------------------------------------------
+%     if optim_cov(1)
+%         if verbose > 0
+%             fprintf('> Update Covariance\n');
+%         end
+%         % rho     = multicoil_mean_ml(x, s, A, rho, optim);
+%         % rho = multicoil_mean_map(x, s, A, rho, [0 1E-5 0], vs, mask);
+%         [C,A]   = multicoil_cov(rho, x, s);
+%         ldC = spm_matcomp('LogDet', C);
+%         if verbose > 1
+%             multicoil_plot_mean(rho, C, ll, vs);
+%         end
+%     end
     
     % ---------------------------------------------------------------------
     % Coil-wise sensitivity update
+    % ---------------------------------------------------------------------
+    if isdiag(A)
+        % If precision matrix is diagonal, computation of the
+        % log-likelihood and derivatives in implemented in a slightly
+        % faster way (each sensitivity field only depends on one coil).
+        % This means that we need to sum the log-likelihood of each coil to
+        % get the complete model log-likelihood.
+        llm = 0;
+    end
     for n=1:N
-        
-        % Update mean (ML = closed-form / MAP = Gauss-Newton)
-        rho = multicoil_mean_ml(x, s, A, rho, [optim_mag(1) optim_phase(1)]);
-     
-        if verbose > 1
-            multicoil_plot_fit(n, x, s, rho, vs)
-        end
-        
+                
+        % -----------------------------------------------------------------
         % Update sensitivity (Gauss-Newton)
+        % -----------------------------------------------------------------
+        
+        if verbose > 1
+            multicoil_plot_fit(n, x, s, rho, mask, vs)
+        end
         if verbose > 0
             fprintf('> Update Sensitivity: %2d', n);
         end
-        
-        [s,llm,llp,ok,ls] = multicoil_sensitivity(...
+        [s,llm1,llp,ok,ls] = multicoil_sensitivity(...
             rho, x, s, ...
             'Index',         n, ...
             'Precision',     A, ...
             'RegStructure',  reg, ...
             'RegCoilFactor', alpha, ...
-            'RegCompFactor', [gamma_mag(1) gamma_phase(1)], ...
+            'RegCompFactor', gamma, ...
             'RegBoundary',   bnd, ...
             'VoxelSize',     vs, ...
-            'SensOptim',     [optim_mag(1) optim_phase(1)], ...
+            'SensOptim',     optim, ...
             'LLPrior',       llp, ...
-            'Parallel',      Nw);
-        
+            'Parallel',      Nw, ...
+            'SamplingMask',  mask);
+        if isdiag(A)
+            llm = llm + llm1;
+        else
+            llm = llm1;
+        end
         if verbose > 0
             if ok, fprintf(' :D (%d)\n', ls);
             else,  fprintf(' :(\n')
@@ -296,15 +324,17 @@ for it=1:itermax
         end
         
         if verbose > 1
-            multicoil_plot_fit(n, x, s, rho, vs)
-            % , '', sprintf('test/brain/fit_movie_%d.gif', n)
+            multicoil_plot_fit(n, x, s, rho, mask, vs)
         end
         
     end
     
+    % Add normalisation term
+    llm = llm - sum(mask(:))/numel(mask)*size(x,1)*size(x,2)*size(x,3)*ldC;
+    
     % ---------------------------------------------------------------------
     % Center sensitivity fields
-    
+    % ---------------------------------------------------------------------
     % We know that, at the optimum, sum{alpha_n*s_n} = 0
     % To converge faster, and to avoid bias towards the initial mean
     % estimate, we enforce this condition at each iteration.
@@ -325,10 +355,31 @@ for it=1:itermax
     % lp = llp - llpsum;
     clear sumsen
     
+    for i=1:5
+        if verbose > 0
+            fprintf('> Update mean');
+        end
+        [rho,llm,~,ok,ls] = multicoil_mean_map(...
+            x, s, rho, ...
+            'Precision',    A, ...
+            'RegFactor',    0, ...
+            'VoxelSize',    vs, ...
+            'Parallel',     Nw, ...
+            'SamplingMask', mask);
+        if verbose > 0
+            if ok, fprintf(' :D (%d)\n', ls);
+            else,  fprintf(' :(\n')
+            end
+        end
+        if verbose > 1
+            multicoil_plot_mean(rho, C, ll, vs);
+        end
+   end
+   llm = llm - sum(mask(:))/numel(mask)*size(x,1)*size(x,2)*size(x,3)*ldC;
     
     % ---------------------------------------------------------------------
     % Update log-likelihood
-    llm = llm - size(x,1)*size(x,2)*size(x,3)*ldC; % Add logDet part
+    % ---------------------------------------------------------------------
     ll = [ll (llm+llp)];
     if verbose > 1
         multicoil_plot_mean(rho, C, ll, vs);
@@ -336,6 +387,7 @@ for it=1:itermax
     
     % ---------------------------------------------------------------------
     % Check gain
+    % ---------------------------------------------------------------------
     if it > 1
         gain = (ll(end) - ll(end-1))/(max(ll(1:end), [], 'omitnan') - min(ll(1:end), [], 'omitnan'));
         if verbose > 0
@@ -348,35 +400,17 @@ for it=1:itermax
             fprintf('> Gain: %20.10g (%s)\n', gain, sgn);
         end
         if it >= itermax
-            if verbose > 0
-                fprintf('Reached maximum number of iterations\n');
+            if verbose > -1
+                fprintf('Reached maximum number of iterations (%d)\n', it);
             end
             break
         end
-        if (it-it0) >= subitermax || ...
-           ((it-it0) >= subitermin) && (it >= itermin) && abs(gain) < tol(1)
-            if verbose > 0
-                fprintf('Converged or reached maximum number of iterations\n');
+        if (it >= itermin) && abs(gain) < tol
+            if verbose > -1
+                fprintf('Converged (%f < %f)\n', abs(gain), tol);
             end
-            if stop(1)
-                break
-            else
-                it0   = it;
-                upprm = true;
-            end
+            break
         end
-    end
-    
-    % ---------------------------------------------------------------------
-    % Update parameters
-    if upprm
-        optim_cov   = optim_cov(2:end);
-        optim_mag   = optim_mag(2:end);
-        optim_phase = optim_phase(2:end);
-        gamma_mag   = gamma_mag(2:end);
-        gamma_phase = gamma_phase(2:end);
-        tol         = tol(2:end);
-        stop        = stop(2:end);
     end
     
 end
@@ -384,6 +418,7 @@ end
 
 % -------------------------------------------------------------------------
 % Time execution
+% -------------------------------------------------------------------------
 if verbose > -1
     stop = toc(start);
     fprintf('Processing finished: in %s\n', sec2ydhms(stop));

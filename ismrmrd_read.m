@@ -7,8 +7,8 @@ function dat = ismrmrd_read(fname, varargin)
 % --------------------------
 % channel              - Indices of channels to read
 % readout              - Indices of readout samples to read
-% kspace_encode_step_1 - Indices of first phase encoding dir 
-% kspace_encode_step_2 - Indices of second phase encoding dir 
+% kspace_encode_step_1 - Indices of first phase encoding dir to read
+% kspace_encode_step_2 - Indices of second phase encoding dir to read
 % average              - Indices of averages to read
 % slice                - Indices of slices to read
 % contrast             - Indices of contrasts/echoes to read
@@ -21,16 +21,19 @@ function dat = ismrmrd_read(fname, varargin)
 %
 % OPTIONS (KEYWORDS)
 % ------------------
-% layout - Output memory layout: ['box']/'expand'/'compact'
-%          * box:     crop input indices with no data
-%          * expand:  keep input indices (might use up a lot of memory)
-%          * compact: Do not store zeros (indices are not "right")
-% order  - Output dimensions ordering
-%          [{'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'ph' 'rp' 'st' 'sg'}]
+% layout  - Output memory layout:
+%           * ['expand']  Keep input indices (might use up a lot of memory)
+%           * 'box'       Crop input indices with no data
+%           * 'compact'   Do not store zeros (indices are not "right")
+% order   - Output dimensions ordering
+%           [{'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'ph' 'rp' 'st' 'sg'}]
+% verbose - Speak while reading [false]
 %
 % OUTPUT
 % ------
 % dat - A k-space volume.
+%__________________________________________________________________________
+% Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
 % -------------------------------------------------------------------------
 % Parse input arguments
@@ -48,31 +51,33 @@ p.addParameter('phase',                 [],  @isnumeric);
 p.addParameter('repetition',            [],  @isnumeric);
 p.addParameter('set',                   [],  @isnumeric);
 p.addParameter('segment',               [],  @isnumeric);
-p.addParameter('layout',              'box', @ischar);
+p.addParameter('layout',           'expand', @ischar);
 p.addParameter('order',       default_order, @iscell);
 p.addParameter('subpart',                '', @ischar);
+p.addParameter('verbose',                 0, @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.parse(varargin{:});
-k1_out = p.Results.kspace_encode_step_1;
-k2_out = p.Results.kspace_encode_step_2;
-av_out = p.Results.average;
-sl_out = p.Results.slice;
-ct_out = p.Results.contrast;
-ph_out = p.Results.phase;
-rp_out = p.Results.repetition;
-st_out = p.Results.set;
-sg_out = p.Results.segment;
-rd_out = p.Results.readout;
-ch_out = p.Results.channel;
+k1_out  = p.Results.kspace_encode_step_1;
+k2_out  = p.Results.kspace_encode_step_2;
+av_out  = p.Results.average;
+sl_out  = p.Results.slice;
+ct_out  = p.Results.contrast;
+ph_out  = p.Results.phase;
+rp_out  = p.Results.repetition;
+st_out  = p.Results.set;
+sg_out  = p.Results.segment;
+rd_out  = p.Results.readout;
+ch_out  = p.Results.channel;
 layout  = p.Results.layout;
 subpart = p.Results.subpart;
 order   = p.Results.order;
+verbose = p.Results.verbose;
 
 flags_remove = {}; % Unused for now, might be useful?
 flags_out    = {}; % Unused for now, might be useful?
 
 % -------------------------------------------------------------------------
 % Read soft and hard headers
-fprintf('Read header\n');
+if verbose, fprintf('Read header\n'); end
 softHeader = ismrmrd_xml(fname);
 softHeader = softHeader.ismrmrdHeader;
 [hardHeader, nblines] = ismrmrd_read_member(fname, 'head');
@@ -95,12 +100,12 @@ mask = ones(nblines, 1, 'logical');
 % Specific subparts
 switch lower(subpart)
     case {'autocalib' 'ac'}
-        fprintf('Find autocalibration lines\n');
+        if verbose, fprintf('Find autocalibration lines\n'); end
         try
             idx_k1    = hardHeader.idx.kspace_encode_step_1;
-            centre_k1 = limits.kspace_encoding_step_1.centre;
+            center_k1 = limits.kspace_encoding_step_1.center;
             idx_k2    = hardHeader.idx.kspace_encode_step_2;
-            centre_k2 = limits.kspace_encoding_step_2.centre;
+            center_k2 = limits.kspace_encoding_step_2.center;
             
             ack1name       = 'EmbeddedRefLinesE1';
             ack2name       = 'EmbeddedRefLinesE2';
@@ -110,10 +115,10 @@ switch lower(subpart)
             ac_nblines_k1  = uservalues(strcmpi(usernames,ack1name));
             ac_nblines_k2  = uservalues(strcmpi(usernames,ack2name));
             
-            mask_k1 = idx_k1 >= centre_k1 - ac_nblines_k1/2 ...
-                    & idx_k1 <  centre_k1 + ac_nblines_k1/2;
-            mask_k2 = idx_k2 >= centre_k2 - ac_nblines_k2/2 ...
-                    & idx_k2 <  centre_k2 + ac_nblines_k2/2;
+            mask_k1 = idx_k1 >= center_k1 - ac_nblines_k1/2 ...
+                    & idx_k1 <  center_k1 + ac_nblines_k1/2;
+            mask_k2 = idx_k2 >= center_k2 - ac_nblines_k2/2 ...
+                    & idx_k2 <  center_k2 + ac_nblines_k2/2;
             mask    = mask & mask_k1(:) & mask_k2(:);
             clear mask_k1 mask_k2
         catch
@@ -121,7 +126,7 @@ switch lower(subpart)
         end
         
     case 'cartesian'
-        fprintf('Find cartesian lines\n');
+        if verbose, fprintf('Find cartesian lines\n'); end
         try
             idx_k1  = hardHeader.idx.kspace_encode_step_1;
             min_k1  = limits.kspace_encoding_step_1.minimum;
@@ -141,7 +146,7 @@ switch lower(subpart)
         end
         
     case 'caipi'
-        fprintf('Find CAIPI lines\n');
+        if verbose, fprintf('Find CAIPI lines\n'); end
         warning('CAIPI extraction was never tested.')
         try
             idx_k1 = hardHeader.idx.kspace_encode_step_1;
@@ -167,7 +172,7 @@ end
 
 % -------------------------------------------------------------------------
 % Select indices
-fprintf('Select lines\n');
+if verbose, fprintf('Select lines\n'); end
 if ~isempty(k1_out)
     mask = mask & reshape(ismember(hardHeader.idx.kspace_encode_step_1, k1_out-1), [], 1);
 end
@@ -253,7 +258,7 @@ end
 
 % -------------------------------------------------------------------------
 % Read selected lines from dataset
-fprintf('Read selected lines\n');
+if verbose, fprintf('Read selected lines\n'); end
 dataLines  = ismrmrd_read_member(fname, {'data' 'head'}, find(mask));
 rd_size    = max(dataLines.head.number_of_samples);
 ch_size    = max(dataLines.head.available_channels);
@@ -264,7 +269,7 @@ dataLines  = reshape(dataLines, 2, rd_size, ch_size, []);
 % Remove unwanted channels and samples 
 % + convert to complex
 % + orientation [ch rd other]
-fprintf('Select samples and channels\n');
+if verbose, fprintf('Select samples and channels\n'); end
 if isempty(rd_out), rd_out = 1:rd_size; else, rd_size = numel(rd_out); end
 if isempty(ch_out), ch_out = 1:ch_size; else, ch_size = numel(ch_out); end
 dataLines = dataLines(:,rd_out,ch_out,:);
@@ -272,7 +277,7 @@ dataLines = permute(dataLines(1,:,:,:) + 1i * dataLines(2,:,:,:), [3 2 4 1]);
 
 % -------------------------------------------------------------------------
 % Allocate output + populate 
-fprintf('Format output\n');
+if verbose, fprintf('Format output\n'); end
 idx_out = cell(1,9); % < [k1 k2 av sl ct ph rp st sg]
 switch lower(layout)
     case 'expand'
@@ -306,29 +311,39 @@ switch lower(layout)
         idx_out{8} = 1 + idx_out{8} - min(idx_out{8});
         idx_out{9} = 1 + idx_out{9} - min(idx_out{9});
     case 'compact'
-        [idx_out{3},~] = find(bsxfun(@eq, hardHeader.idx.average(mask),    unique(hardHeader.idx.average(mask))'));
-        [idx_out{4},~] = find(bsxfun(@eq, hardHeader.idx.slice(mask),      unique(hardHeader.idx.slice(mask))'));
-        [idx_out{5},~] = find(bsxfun(@eq, hardHeader.idx.contrast(mask),   unique(hardHeader.idx.contrast(mask))'));
-        [idx_out{6},~] = find(bsxfun(@eq, hardHeader.idx.phase(mask),      unique(hardHeader.idx.phase(mask))'));
-        [idx_out{7},~] = find(bsxfun(@eq, hardHeader.idx.repetition(mask), unique(hardHeader.idx.repetition(mask))'));
-        [idx_out{8},~] = find(bsxfun(@eq, hardHeader.idx.set(mask),        unique(hardHeader.idx.set(mask))'));
-        [idx_out{9},~] = find(bsxfun(@eq, hardHeader.idx.segment(mask),    unique(hardHeader.idx.segment(mask))'));
+        [idx_out{3},~] = find(bsxfun(@eq, hardHeader.idx.average(mask),    unique(hardHeader.idx.average(mask))')');
+        [idx_out{4},~] = find(bsxfun(@eq, hardHeader.idx.slice(mask),      unique(hardHeader.idx.slice(mask))')');
+        [idx_out{5},~] = find(bsxfun(@eq, hardHeader.idx.contrast(mask),   unique(hardHeader.idx.contrast(mask))')');
+        [idx_out{6},~] = find(bsxfun(@eq, hardHeader.idx.phase(mask),      unique(hardHeader.idx.phase(mask))')');
+        [idx_out{7},~] = find(bsxfun(@eq, hardHeader.idx.repetition(mask), unique(hardHeader.idx.repetition(mask))')');
+        [idx_out{8},~] = find(bsxfun(@eq, hardHeader.idx.set(mask),        unique(hardHeader.idx.set(mask))')');
+        [idx_out{9},~] = find(bsxfun(@eq, hardHeader.idx.segment(mask),    unique(hardHeader.idx.segment(mask))')');
         switch lower(subpart)
             case 'caipi'
                 error('Compact CAIPI not implemented yet')
             otherwise
-                [idx_out{1},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_1(mask), unique(hardHeader.idx.kspace_encode_step_1(mask))'));
-                [idx_out{2},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_2(mask), unique(hardHeader.idx.kspace_encode_step_2(mask))'));
+                [idx_out{1},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_1(mask), unique(hardHeader.idx.kspace_encode_step_1(mask))')');
+                [idx_out{2},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_2(mask), unique(hardHeader.idx.kspace_encode_step_2(mask))')');
         end
     otherwise
         error('Unknown layout %s', layout)
 end
 idx_out = cellfun(@(X) X(:), idx_out, 'UniformOutput', false);
 dim_out = [ch_size rd_size cellfun(@max, idx_out)];
+if strcmpi(layout, 'expand')
+    dim_out(2) = softHeader.encoding.encodedSpace.matrixSize.x;
+    dim_out(3) = softHeader.encoding.encodedSpace.matrixSize.y;
+    if unique(hardHeader.idx.slice) > 1
+        dim_out(6) = softHeader.encoding.encodedSpace.matrixSize.z;
+    else
+        dim_out(4) = softHeader.encoding.encodedSpace.matrixSize.z;
+    end
+end
 dat     = zeros(dim_out, 'like', dataLines);
 
 dat(:,:,sub2ind(dim_out(3:end), idx_out{:})) = dataLines;
 
+% -------------------------------------------------------------------------
 % Reorder dimensions
 permutation = zeros(1,numel(order));
 all_dim     = 1:11;

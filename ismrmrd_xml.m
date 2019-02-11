@@ -2,6 +2,8 @@ function header = ismrmrd_xml(fname, schema)
 % FORMAT header = ismrmrd_xml(fname)
 %
 % Read the flexible header of an ismrmrd file into a structure
+%__________________________________________________________________________
+% Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
 % -------------------------------------------------------------------------
 % Read schema
@@ -56,8 +58,8 @@ if isfield(schema, 'parse') && ~isempty(schema.parse)
             if ~isempty(char(theChild.getData))
                 switch childName(2:end)
                     case 'text'
-                        value = schema.parse(theChild.getData);
-                        if isnumeric(value)
+                        value = schema.parse(char(theChild.getData));
+                        if (isnumeric(value) || islogical(value)) && isscalar(value)
                             obj(end+1) = value;
                         else
                             if isempty(obj)
