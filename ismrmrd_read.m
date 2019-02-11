@@ -21,16 +21,19 @@ function dat = ismrmrd_read(fname, varargin)
 %
 % OPTIONS (KEYWORDS)
 % ------------------
-% layout - Output memory layout: ['box']/'expand'/'compact'
-%          * box:     crop input indices with no data
-%          * expand:  keep input indices (might use up a lot of memory)
-%          * compact: Do not store zeros (indices are not "right")
-% order  - Output dimensions ordering
-%          [{'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'ph' 'rp' 'st' 'sg'}]
+% layout  - Output memory layout:
+%           * ['expand']  Keep input indices (might use up a lot of memory)
+%           * 'box'       Crop input indices with no data
+%           * 'compact'   Do not store zeros (indices are not "right")
+% order   - Output dimensions ordering
+%           [{'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'ph' 'rp' 'st' 'sg'}]
+% verbose - Speak while reading [false]
 %
 % OUTPUT
 % ------
 % dat - A k-space volume.
+%__________________________________________________________________________
+% Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
 % -------------------------------------------------------------------------
 % Parse input arguments
@@ -48,31 +51,33 @@ p.addParameter('phase',                 [],  @isnumeric);
 p.addParameter('repetition',            [],  @isnumeric);
 p.addParameter('set',                   [],  @isnumeric);
 p.addParameter('segment',               [],  @isnumeric);
-p.addParameter('layout',              'box', @ischar);
+p.addParameter('layout',           'expand', @ischar);
 p.addParameter('order',       default_order, @iscell);
 p.addParameter('subpart',                '', @ischar);
+p.addParameter('verbose',                 0, @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.parse(varargin{:});
-k1_out = p.Results.kspace_encode_step_1;
-k2_out = p.Results.kspace_encode_step_2;
-av_out = p.Results.average;
-sl_out = p.Results.slice;
-ct_out = p.Results.contrast;
-ph_out = p.Results.phase;
-rp_out = p.Results.repetition;
-st_out = p.Results.set;
-sg_out = p.Results.segment;
-rd_out = p.Results.readout;
-ch_out = p.Results.channel;
+k1_out  = p.Results.kspace_encode_step_1;
+k2_out  = p.Results.kspace_encode_step_2;
+av_out  = p.Results.average;
+sl_out  = p.Results.slice;
+ct_out  = p.Results.contrast;
+ph_out  = p.Results.phase;
+rp_out  = p.Results.repetition;
+st_out  = p.Results.set;
+sg_out  = p.Results.segment;
+rd_out  = p.Results.readout;
+ch_out  = p.Results.channel;
 layout  = p.Results.layout;
 subpart = p.Results.subpart;
 order   = p.Results.order;
+verbose = p.Results.verbose;
 
 flags_remove = {}; % Unused for now, might be useful?
 flags_out    = {}; % Unused for now, might be useful?
 
 % -------------------------------------------------------------------------
 % Read soft and hard headers
-fprintf('Read header\n');
+if verbose, fprintf('Read header\n'); end
 softHeader = ismrmrd_xml(fname);
 softHeader = softHeader.ismrmrdHeader;
 [hardHeader, nblines] = ismrmrd_read_member(fname, 'head');
