@@ -311,19 +311,19 @@ switch lower(layout)
         idx_out{8} = 1 + idx_out{8} - min(idx_out{8});
         idx_out{9} = 1 + idx_out{9} - min(idx_out{9});
     case 'compact'
-        [idx_out{3},~] = find(bsxfun(@eq, hardHeader.idx.average(mask),    unique(hardHeader.idx.average(mask))'));
-        [idx_out{4},~] = find(bsxfun(@eq, hardHeader.idx.slice(mask),      unique(hardHeader.idx.slice(mask))'));
-        [idx_out{5},~] = find(bsxfun(@eq, hardHeader.idx.contrast(mask),   unique(hardHeader.idx.contrast(mask))'));
-        [idx_out{6},~] = find(bsxfun(@eq, hardHeader.idx.phase(mask),      unique(hardHeader.idx.phase(mask))'));
-        [idx_out{7},~] = find(bsxfun(@eq, hardHeader.idx.repetition(mask), unique(hardHeader.idx.repetition(mask))'));
-        [idx_out{8},~] = find(bsxfun(@eq, hardHeader.idx.set(mask),        unique(hardHeader.idx.set(mask))'));
-        [idx_out{9},~] = find(bsxfun(@eq, hardHeader.idx.segment(mask),    unique(hardHeader.idx.segment(mask))'));
+        [idx_out{3},~] = find(bsxfun(@eq, hardHeader.idx.average(mask),    unique(hardHeader.idx.average(mask))')');
+        [idx_out{4},~] = find(bsxfun(@eq, hardHeader.idx.slice(mask),      unique(hardHeader.idx.slice(mask))')');
+        [idx_out{5},~] = find(bsxfun(@eq, hardHeader.idx.contrast(mask),   unique(hardHeader.idx.contrast(mask))')');
+        [idx_out{6},~] = find(bsxfun(@eq, hardHeader.idx.phase(mask),      unique(hardHeader.idx.phase(mask))')');
+        [idx_out{7},~] = find(bsxfun(@eq, hardHeader.idx.repetition(mask), unique(hardHeader.idx.repetition(mask))')');
+        [idx_out{8},~] = find(bsxfun(@eq, hardHeader.idx.set(mask),        unique(hardHeader.idx.set(mask))')');
+        [idx_out{9},~] = find(bsxfun(@eq, hardHeader.idx.segment(mask),    unique(hardHeader.idx.segment(mask))')');
         switch lower(subpart)
             case 'caipi'
                 error('Compact CAIPI not implemented yet')
             otherwise
-                [idx_out{1},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_1(mask), unique(hardHeader.idx.kspace_encode_step_1(mask))'));
-                [idx_out{2},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_2(mask), unique(hardHeader.idx.kspace_encode_step_2(mask))'));
+                [idx_out{1},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_1(mask), unique(hardHeader.idx.kspace_encode_step_1(mask))')');
+                [idx_out{2},~] = find(bsxfun(@eq, hardHeader.idx.kspace_encode_step_2(mask), unique(hardHeader.idx.kspace_encode_step_2(mask))')');
         end
     otherwise
         error('Unknown layout %s', layout)
@@ -334,6 +334,7 @@ dat     = zeros(dim_out, 'like', dataLines);
 
 dat(:,:,sub2ind(dim_out(3:end), idx_out{:})) = dataLines;
 
+% -------------------------------------------------------------------------
 % Reorder dimensions
 permutation = zeros(1,numel(order));
 all_dim     = 1:11;
