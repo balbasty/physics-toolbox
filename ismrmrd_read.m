@@ -103,9 +103,9 @@ switch lower(subpart)
         fprintf('Find autocalibration lines\n');
         try
             idx_k1    = hardHeader.idx.kspace_encode_step_1;
-            centre_k1 = limits.kspace_encoding_step_1.centre;
+            center_k1 = limits.kspace_encoding_step_1.center;
             idx_k2    = hardHeader.idx.kspace_encode_step_2;
-            centre_k2 = limits.kspace_encoding_step_2.centre;
+            center_k2 = limits.kspace_encoding_step_2.center;
             
             ack1name       = 'EmbeddedRefLinesE1';
             ack2name       = 'EmbeddedRefLinesE2';
@@ -115,10 +115,10 @@ switch lower(subpart)
             ac_nblines_k1  = uservalues(strcmpi(usernames,ack1name));
             ac_nblines_k2  = uservalues(strcmpi(usernames,ack2name));
             
-            mask_k1 = idx_k1 >= centre_k1 - ac_nblines_k1/2 ...
-                    & idx_k1 <  centre_k1 + ac_nblines_k1/2;
-            mask_k2 = idx_k2 >= centre_k2 - ac_nblines_k2/2 ...
-                    & idx_k2 <  centre_k2 + ac_nblines_k2/2;
+            mask_k1 = idx_k1 >= center_k1 - ac_nblines_k1/2 ...
+                    & idx_k1 <  center_k1 + ac_nblines_k1/2;
+            mask_k2 = idx_k2 >= center_k2 - ac_nblines_k2/2 ...
+                    & idx_k2 <  center_k2 + ac_nblines_k2/2;
             mask    = mask & mask_k1(:) & mask_k2(:);
             clear mask_k1 mask_k2
         catch
