@@ -173,8 +173,8 @@ propmask = sum(mask(:))/numel(mask);
 % -------------------------------------------------------------------------
 % Compute conditional part (slice-wise to save memory)
 % -------------------------------------------------------------------------
-% parfor (z=1:lat(3), Nw)
-for z=1:lat(3)
+parfor (z=1:lat(3), Nw)
+% for z=1:lat(3)
     
     % ---------------------------------------------------------------------
     % Load one slice of the complete coil dataset
@@ -307,8 +307,8 @@ for ls=1:6
     % ---------------------------------------------------------------------
     % Compute log-likelihood (conditional)
     llm = 0;
-    % parfor (z=1:lat(3), Nw)
-    for z=1:lat(3)
+    parfor (z=1:lat(3), Nw)
+    % for z=1:lat(3)
     
         % -----------------------------------------------------------------
         % Load one slice of the complete coil dataset

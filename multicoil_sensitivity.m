@@ -288,8 +288,8 @@ for n=all_n
     
     % ---------------------------------------------------------------------
     % Compute gradient slice-wise to save memory
-    % parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
-    for z=1:lat(3)          % < Uncomment for sequential processing
+    parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
+    % for z=1:lat(3)          % < Uncomment for sequential processing
 
         % -----------------------------------------------------------------
         % Enforce boundary condition -> needed with parfor
@@ -356,19 +356,20 @@ for n=all_n
                 H(:,:,z)    = reshape(Hz, lat(1), lat(2));
                 Hz          = []; % clear
             case 'frequency'
-                b3z = B3(z,:);
-                gz  = reshape(gz, lat(1), lat(2), 1, []);
-                gz  = dct(gz, [], 1);
-                gz  = gz(1:nbasis(1),:,:,:);
-                gz  = dct(gz, [], 2);
-                gz  = gz(:,1:nbasis(2),:,:);
-                gz  = bsxfun(@times, gz, reshape(b3z, 1, 1, []));
-                g   = g + gz;
-                gz  = []; % clear
-                Hz  = reshape(Hz, lat(1), lat(2));
-                Hz  = kron(b3z'*b3z,spm_krutil(double(Hz),B1,B2,1));
-                H   = H + reshape(Hz, [nbasis nbasis]);
-                Hz  = []; % clear
+                error('Commented out to allow parfor')
+%                 b3z = B3(z,:);
+%                 gz  = reshape(gz, lat(1), lat(2), 1, []);
+%                 gz  = dct(gz, [], 1);
+%                 gz  = gz(1:nbasis(1),:,:,:);
+%                 gz  = dct(gz, [], 2);
+%                 gz  = gz(:,1:nbasis(2),:,:);
+%                 gz  = bsxfun(@times, gz, reshape(b3z, 1, 1, []));
+%                 g   = g + gz;
+%                 gz  = []; % clear
+%                 Hz  = reshape(Hz, lat(1), lat(2));
+%                 Hz  = kron(b3z'*b3z,spm_krutil(double(Hz),B1,B2,1));
+%                 H   = H + reshape(Hz, [nbasis nbasis]);
+%                 Hz  = []; % clear
         end
         
         tmp   = []; % clear
