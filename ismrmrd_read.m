@@ -100,7 +100,7 @@ mask = ones(nblines, 1, 'logical');
 % Specific subparts
 switch lower(subpart)
     case {'autocalib' 'ac'}
-        fprintf('Find autocalibration lines\n');
+        if verbose, fprintf('Find autocalibration lines\n'); end
         try
             idx_k1    = hardHeader.idx.kspace_encode_step_1;
             center_k1 = limits.kspace_encoding_step_1.center;
@@ -126,7 +126,7 @@ switch lower(subpart)
         end
         
     case 'cartesian'
-        fprintf('Find cartesian lines\n');
+        if verbose, fprintf('Find cartesian lines\n'); end
         try
             idx_k1  = hardHeader.idx.kspace_encode_step_1;
             min_k1  = limits.kspace_encoding_step_1.minimum;
@@ -146,7 +146,7 @@ switch lower(subpart)
         end
         
     case 'caipi'
-        fprintf('Find CAIPI lines\n');
+        if verbose, fprintf('Find CAIPI lines\n'); end
         warning('CAIPI extraction was never tested.')
         try
             idx_k1 = hardHeader.idx.kspace_encode_step_1;
@@ -172,7 +172,7 @@ end
 
 % -------------------------------------------------------------------------
 % Select indices
-fprintf('Select lines\n');
+if verbose, fprintf('Select lines\n'); end
 if ~isempty(k1_out)
     mask = mask & reshape(ismember(hardHeader.idx.kspace_encode_step_1, k1_out-1), [], 1);
 end
@@ -258,7 +258,7 @@ end
 
 % -------------------------------------------------------------------------
 % Read selected lines from dataset
-fprintf('Read selected lines\n');
+if verbose, fprintf('Read selected lines\n'); end
 dataLines  = ismrmrd_read_member(fname, {'data' 'head'}, find(mask));
 rd_size    = max(dataLines.head.number_of_samples);
 ch_size    = max(dataLines.head.available_channels);
@@ -269,7 +269,7 @@ dataLines  = reshape(dataLines, 2, rd_size, ch_size, []);
 % Remove unwanted channels and samples 
 % + convert to complex
 % + orientation [ch rd other]
-fprintf('Select samples and channels\n');
+if verbose, fprintf('Select samples and channels\n'); end
 if isempty(rd_out), rd_out = 1:rd_size; else, rd_size = numel(rd_out); end
 if isempty(ch_out), ch_out = 1:ch_size; else, ch_size = numel(ch_out); end
 dataLines = dataLines(:,rd_out,ch_out,:);
@@ -277,7 +277,7 @@ dataLines = permute(dataLines(1,:,:,:) + 1i * dataLines(2,:,:,:), [3 2 4 1]);
 
 % -------------------------------------------------------------------------
 % Allocate output + populate 
-fprintf('Format output\n');
+if verbose, fprintf('Format output\n'); end
 idx_out = cell(1,9); % < [k1 k2 av sl ct ph rp st sg]
 switch lower(layout)
     case 'expand'
