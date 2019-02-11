@@ -12,7 +12,7 @@ end
 % -------------------------------------------------------------------------
 % Defaults
 sens        = [];
-sensmsk         = [];
+sensmsk     = [];
 ssq         = [];
 A           = 1;
 coilorder   = {'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'st' 'sg'};
@@ -31,20 +31,20 @@ verbose     = 0;
 % Parse input
 p = inputParser;
 p.FunctionName = 'multicoil_sense';
-p.addRequired('CoilKSpace',                      @(X) ischar(X) || isarray(X));
-p.addParameter('SensMaps',          sens,        @isarray);
-p.addParameter('SensMask',          sensmsk,     @isarray);
-p.addParameter('SumSquare',         ssq,         @isarray);
-p.addParameter('Precision',         A,           @isnumeric);
-p.addParameter('CoilOrder',         coilorder,   @iscell);
-p.addParameter('SensOrder',         sensorder,   @iscell);
-p.addParameter('CoilCompact',       coilcompact, @isboolean);
-p.addParameter('Acceleration',      af,          @isnumeric);
-p.addParameter('AcquisitionMatrix', lat_acq,     @isnumeric);
-p.addParameter('AcquisitionFOV',    fov_acq,     @isnumeric);
-p.addParameter('ReconMatrix',       lat_recon,   @isnumeric);
-p.addParameter('ReconFOV',          fov_recon,   @isnumeric);
-p.addParameter('Contrast',          contrasts,   @isnumeric);
+p.addRequired('CoilKSpace',                       @(X) ischar(X) || isarray(X));
+p.addParameter('SensMaps',          sens,         @isarray);
+p.addParameter('SensMask',          sensmsk,      @isarray);
+p.addParameter('SumSquare',         ssq,          @isarray);
+p.addParameter('Precision',         A,            @isnumeric);
+p.addParameter('CoilOrder',         coilorder,    @iscell);
+p.addParameter('SensOrder',         sensorder,    @iscell);
+p.addParameter('CoilCompact',       coilcompact,  @isboolean);
+p.addParameter('Acceleration',      af,           @isnumeric);
+p.addParameter('AcquisitionMatrix', lat_acq,      @isnumeric);
+p.addParameter('AcquisitionFOV',    fov_acq,      @isnumeric);
+p.addParameter('ReconMatrix',       lat_recon,    @isnumeric);
+p.addParameter('ReconFOV',          fov_recon,    @isnumeric);
+p.addParameter('Contrast',          contrasts,    @isnumeric);
 p.addParameter('SensContrast',      senscontrast, @isnumeric);
 p.addParameter('Verbose',           verbose,      @isboolean);
 p.parse(varargin{:});
@@ -147,6 +147,10 @@ if filteredsens
 else
     sens = idct(sens, recon_lat(3), 4);
     sens = sens * sqrt(recon_lat(3)) / sqrt(dimsens(3));
+    
+    % This is just so that parfor does not complain
+    sensmsk = zeros([0 0 0 recon_lat(3)], 'single');
+    ssq     = zeros([0 0 0 recon_lat(3)], 'single');
 end
 
 % % > debug: test on a few slices
@@ -158,9 +162,10 @@ end
 
 % -------------------------------------------------------------------------
 % Reconstruction
-recon    = zeros(recon_lat(1)*recon_lat(2),recon_lat(3), 'like', single(1i));
+recon = zeros(recon_lat(1)*recon_lat(2),recon_lat(3), 'like', single(1i));
 ncoil = size(rdata,1);
-for z=1:recon_lat(3)
+% for z=1:recon_lat(3)
+parfor(z=1:recon_lat(3), 15)
     % Acquired: read one slice (and expand to full matrix)
     xz = zeros(ncoil,recon_lat(1),recon_lat(2),'like', double(1i));
     xz(:,1:af(1):end,1:af(2):end) = rdata(:,:,:,z);
