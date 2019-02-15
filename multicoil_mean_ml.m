@@ -29,7 +29,7 @@ else,      loadarray = @loadarray_cpu; end
 
 % -------------------------------------------------------------------------
 % Allocate output volume
-if nargin < 4
+if nargin < 4 || isempty(rho)
     rho = zeros(lat, 'like', x);
 end
 if nargin < 5
