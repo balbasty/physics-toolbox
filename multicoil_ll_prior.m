@@ -32,7 +32,7 @@ for n=1:size(s,4)
         end
     end
     s1 = reshape(s1, size(s1,1),size(s1,2),size(s1,3),size(s1,5));
-    llp1 = spm_field('vel2mom', s1, [vs alpha(n) * prm], gamma(optim));
+    llp1 = spm_field('vel2mom', gather(s1), [vs alpha(n) * prm], gamma(optim));
     llp1 = -0.5 * double(reshape(llp1, 1, [])) * double(reshape(s1, [], 1));
     llp  = llp + llp1;
 end
