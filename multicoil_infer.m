@@ -6,37 +6,38 @@ function [s,rho,A,ll,llm,llp] = multicoil_infer(varargin)
 %
 % REQUIRED
 % --------
-% coils - (File)Array [Nx Ny Nz Nc (2)] - Complex coil images
+% coils - (File)Array [Nx Ny Nz Nc] - Complex coil images
 %
 % KEYWORDS
 % --------
 % Precision     - Noise precision matrix                    [NaN=estimate]
-% RegCoilFactor - Regularisation factor per coil            [1]
-% RegCoilComp   - Regularisation factor per Re/Im component [1E5]
-% RegDecreaseFactor - Start with more regularisation        [4] (log10)
-% VoxelSize     - Voxel size                                [1 1 1]
+% RegCoilFactor - Regularisation factor per coil            [1/Nc]
+% RegCoilComp   - Regularisation factor per Re/Im component [1E6]
+% RegDecFactor  - Start with more regularisation            [3] (log10)
+% VoxelSize     - Voxel size                                [1]
 % SensOptim     - Optimize real and/or imaginary parts      [true true]
 % CovOptim      - Optimize noise covariance                 [false]
 % Tolerance     - Convergence threshold                     [1E-3]
-% IterMax       - Total maximum number of iterations        [100]
+% IterMax       - Total maximum number of iterations        [15]
 % IterMin       - Total minimum number of iterations        [1]
 % Verbose       - (-1=quiet,0=moderate,1=verbose,2=plot)    [0]
 %
 % ADVANCED
 % --------
-% SensMaps      - Initial complex sensitivity profiles      (File)Array [Nx Ny Nz Nc (2)]
-% MeanImage     - Initial complex mean image                (File)Array [Nx Ny Nz  1 (2)]
+% SamplingMask  - Mask of the k-space sampling scheme       [[]=fully sampled]
+% SensMaps      - Initial complex sensitivity profiles      (File)Array [Nx Ny Nz Nc]
+% MeanImage     - Initial complex mean image                (File)Array [Nx Ny Nz]
 % RegStructure  - Regularisation Structure (abs memb bend)  [0 0 1]
 % RegBoundary   - Boundary conditions for sensitivities     ['neumann']
-% Parallel      - Activate parallelisation                  [false]
+% Parallel      - Number of parallel workers                [0]
 % LLCond        - Previous conditional log-likelihood       [NaN=compute]
 % LLPrior       - Previous prior log-likelihood             [NaN=compute]
 % LLPrev        - Log-likelihood of previous iterations     []
 %
 % OUTPUT
 % ------
-% sens - (Log)-Sensitivity maps - (File)Array [Nx Ny Nz Nc (2)]
-% mean - Mean image             - (File)Array [Nx Ny Nz Nc (2)]
+% sens - (Log)-Sensitivity maps - (File)Array [Nx Ny Nz Nc]
+% mean - Mean image             - (File)Array [Nx Ny Nz Nc]
 % prec - Noise precision        -       Array [Nc Nc]
 % ll   - Log-likelihood
 %
@@ -81,30 +82,30 @@ end
 % -------------------------------------------------------------------------
 % Parse input
 % -------------------------------------------------------------------------
-N = size(varargin{1},4);
-p = inputParser;
+Nc = size(varargin{1},4);
+p  = inputParser;
 p.FunctionName = 'multicoil_infer';
 p.addRequired('CoilImages',                  @isarray);
 p.addParameter('SensMaps',      [],          @isarray);
 p.addParameter('MeanImage',     [],          @isarray);
 p.addParameter('Precision',     NaN,         @isnumeric);
 p.addParameter('RegStructure',  [0 0 1],     @(X) isnumeric(X) && numel(X) == 3);
-p.addParameter('RegCoilFactor', 1/N,         @isnumeric);
-p.addParameter('RegCompFactor', 1E5,         @(X) isnumeric(X) && numel(X) <= 2);
-p.addParameter('RegDecreaseFactor', 4,       @(X) isnumeric(X) && isscalar(X));
+p.addParameter('RegCoilFactor', 1/Nc,        @isnumeric);
+p.addParameter('RegCompFactor', 1E6,         @(X) isnumeric(X) && numel(X) <= 2);
+p.addParameter('RegDecFactor',  3,           @(X) isnumeric(X) && isscalar(X));
 p.addParameter('RegBoundary',   1,           @isboundary);
 p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('SensOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
 p.addParameter('CovOptim',      false,       @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.addParameter('Parallel',      0,           @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.addParameter('Tolerance',     1E-3,        @(X) isnumeric(X) && isscalar(X));
-p.addParameter('IterMax',       100,         @(X) isnumeric(X) && isscalar(X));
+p.addParameter('IterMax',       15,          @(X) isnumeric(X) && isscalar(X));
 p.addParameter('IterMin',       1,           @(X) isnumeric(X) && isscalar(X));
 p.addParameter('LLCond',        NaN,         @(X) isnumeric(X) && isscalar(X));
 p.addParameter('LLPrior',       NaN,         @(X) isnumeric(X) && isscalar(X));
 p.addParameter('LLPrev',        [],          @(X) isnumeric(X));
 p.addParameter('Verbose',       0,           @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
-p.addParameter('SamplingMask', [],           @isarray);
+p.addParameter('SamplingMask',  [],          @isarray);
 p.parse(varargin{:});
 rho           = p.Results.MeanImage;
 x             = p.Results.CoilImages;
@@ -113,7 +114,7 @@ A             = p.Results.Precision;
 reg           = p.Results.RegStructure;
 alpha         = p.Results.RegCoilFactor;
 gamma         = p.Results.RegCompFactor;
-decfactor     = p.Results.RegDecreaseFactor;
+decfactor     = p.Results.RegDecFactor;
 bnd           = p.Results.RegBoundary;
 vs            = p.Results.VoxelSize;
 optim_cov     = p.Results.CovOptim;
@@ -129,40 +130,60 @@ Nw            = p.Results.Parallel;
 mask          = p.Results.SamplingMask;
 
 % -------------------------------------------------------------------------
+% Time execution
+% -------------------------------------------------------------------------
+if verbose > -1
+    fprintf('Processing started\n');
+    start = tic;
+end
+
+% -------------------------------------------------------------------------
 % Post-process input
 % -------------------------------------------------------------------------
-N = size(x,4);
-
+% Store a few useful values
+Nx   = size(x,1);
+Ny   = size(x,2);
+Nz   = size(x,3);
+Nc   = size(x,4);
+Nvox = Nx*Ny*Nz;
+if ~isempty(mask)
+    propmask = sum(mask(:))/numel(mask);
+else
+    propmask = 1;
+end
 % Precision: default = estimate from magnitude
-if isnan(A)
-    [~,A] = multicoil_init_cov(x);
-end
 if numel(A) == 1
-    A = A * eye(N);
+    A = A * eye(Nc);
 end
-% Reg components: just change reg structure
+% Pad voxel size
+vs = padarray(vs(:)', [0 max(0,3-numel(vs))], 'replicate', 'post');
+% Reg components: pad reg structure
 gamma = padarray(gamma(:)', [0 max(0,2-numel(gamma))], 'replicate', 'post');
-% Reg factor: ensure zero sum -> propagate their sum to reg components
-alpha = padarray(alpha(:), [max(0,N-numel(alpha)) 0], 'replicate', 'post');
+% Reg coil factor: ensure zero sum -> propagate their sum to reg components
+alpha = padarray(alpha(:), [max(0,Nc-numel(alpha)) 0], 'replicate', 'post');
 gamma = gamma * sum(alpha);
 alpha = alpha/sum(alpha);
-% Allocate mean
-init_rho = false;
-if isempty(rho)
-    rho = zeros(size(x,1),size(x,2),size(x,3), 'like', x);
-    init_rho = true;
-end
-init_s = false;
-if isempty(s)
-    s = zeros(size(x,1),size(x,2),size(x,3),N,'like',x);
-    init_s = true;
-end
-
 % Decreasing regularisation
 decfactor0 = decfactor;
 decfactor  = linspace(decfactor0, 0, itermax)';
 decfactor  = 10.^decfactor;
 gammafinal = gamma;
+% Allocate mean
+init_rho = isempty(rho);
+if init_rho
+    rho = zeros(Nx, Ny, Nz, 'like', x(1));
+end
+init_s = isempty(s);
+if init_s
+    s = zeros(Nx, Ny, Nz, Nc, 'like', x(1));
+    if isnan(llp)
+        llp = 0;
+    end
+end
+% Parallel processing
+if isnan(Nw),     Nw = 0; end
+if ~isfinite(Nw), Nw = parcluster('local'); Nw = Nw.NumWorkers; end
+
 
 % =========================================================================
 %
@@ -170,12 +191,15 @@ gammafinal = gamma;
 %
 % =========================================================================
 
-% -------------------------------------------------------------------------
-% Time execution
-% -------------------------------------------------------------------------
 if verbose > -1
-    fprintf('Processing started\n');
-    start = tic;
+    fprintf('Initialisation\n');
+end
+
+% -------------------------------------------------------------------------
+% Estimate covariance precision
+% -------------------------------------------------------------------------
+if isempty(A) || any(any(isnan(A)))
+    [~,A] = multicoil_init_cov(x);
 end
 
 % -------------------------------------------------------------------------
@@ -187,8 +211,24 @@ ldC = spm_matcomp('LogDet', C);
 % -------------------------------------------------------------------------
 % Initial estimate of the mean
 % -------------------------------------------------------------------------
+if verbose > 1
+    multicoil_plot_mean(rho, C, ll, vs);
+end
 if init_rho
-    rho = multicoil_mean_ml(x, s, A, rho, optim);
+    if verbose > 0, fprintf('> Update mean: '); end
+    [rho,llm,~,ok,ls] = multicoil_mean_map(...
+        x, s, rho,          ...
+        'Precision',    A,  ...
+        'VoxelSize',    vs, ...
+        'SamplingMask', mask);
+    if verbose > 0
+        if ok, fprintf(' :D (%d)\n', ls);
+        else,  fprintf(' :(\n');
+        end
+    end
+    if verbose > 1
+        multicoil_plot_mean(rho, C, ll, vs);
+    end
 end
 
 % -------------------------------------------------------------------------
@@ -205,10 +245,13 @@ end
 % See: * Bishop's PRML - chapter 2.3.8
 %      * https://en.wikipedia.org/wiki/Von_Mises_distribution
 % Let's do a few iterations of those to centre the mean image.
+if verbose > 1
+    multicoil_plot_mean(rho, C, ll, vs);
+end
 if init_s
     for i=1:3
         if verbose > 0
-            fprintf('> Init sensitivity\n');
+            fprintf('> Update sensitivity\n');
         end
         if optim(1)
             s   = multicoil_init_magnitude(rho, x, s);
@@ -218,10 +261,20 @@ if init_s
         end
 
         if init_rho
+            if verbose > 0, fprintf('> Update mean: '); end
+            [rho,llm,~,ok,ls] = multicoil_mean_map(...
+                x, s, rho,          ...
+                'Precision',    A,  ...
+                'VoxelSize',    vs, ...
+                'SamplingMask', mask);
             if verbose > 0
-                fprintf('> Update mean\n');
+                if ok, fprintf(' :D (%d)\n', ls);
+                else,  fprintf(' :(\n');
+                end
             end
-            rho = multicoil_mean_ml(x, s, A, rho, optim);
+            if verbose > 1
+                multicoil_plot_mean(rho, C, ll, vs);
+            end
         end
     end
 end
@@ -236,8 +289,7 @@ if isnan(llp)
 end
 if isnan(llm)
     % > Initial log-likelihood (cond term)
-    llm = multicoil_ll_cond(x,s,rho,A) ...
-        - sum(mask(:))/numel(mask)*size(x,1)*size(x,2)*size(x,3)*ldC;
+    llm = multicoil_ll_cond(x,s,rho,A) - propmask*Nvox*ldC;
 end
 % ll = [ll (llm+llp)];
 
@@ -256,8 +308,14 @@ for it=1:itermax
     end
     
     if verbose > -1
-        fprintf('Iteration %d\n * reg magnitude = %3e\n * reg phase     = %3e\n', ...
-                it, gamma(1), gamma(2));
+        if verbose > 0
+            fprintf([repmat('-', [1 78]) '\n']);
+        end
+        fprintf('Iteration %d\n', it);
+        if decfactor0
+            fprintf('* reg magnitude = %7.1e\n', gamma(1));
+            fprintf('* reg phase     = %7.1e\n', gamma(2));
+        end
     end
     
 %     % ---------------------------------------------------------------------
@@ -277,60 +335,93 @@ for it=1:itermax
 %     end
     
     % ---------------------------------------------------------------------
-    % Coil-wise sensitivity update
+    % Coil-wise sensitivity update (Gauss-Newton)
     % ---------------------------------------------------------------------
-    if isdiag(A)
-        % If precision matrix is diagonal, computation of the
+    if verbose > 0, fprintf('> Update Sensitivity:'); end
+    if isdiag(A) && verbose < 2
+        % If the precision matrix is diagonal, computation of the
         % log-likelihood and derivatives in implemented in a slightly
         % faster way (each sensitivity field only depends on one coil).
-        % This means that we need to sum the log-likelihood of each coil to
-        % get the complete model log-likelihood.
-        llm = 0;
-    end
-    for n=1:N
-                
-        % -----------------------------------------------------------------
-        % Update sensitivity (Gauss-Newton)
-        % -----------------------------------------------------------------
-        
-        if verbose > 1
-            multicoil_plot_fit(n, x, s, rho, mask, vs)
+        %
+        % * This means that we can distribute the processing of each coil!
+        %
+        % * This also means that we need to sum the log-likelihood of each 
+        %   coil to get the complete model log-likelihood.
+        llp0 = llp;
+        if numel(llp0) == 1
+            llp0 = llp0 * ones(1,Nc);
         end
-        if verbose > 0
-            fprintf('> Update Sensitivity: %2d', n);
-        end
-        [s,llm1,llp,ok,ls] = multicoil_sensitivity(...
-            rho, x, s, ...
-            'Index',         n, ...
-            'Precision',     A, ...
-            'RegStructure',  reg, ...
-            'RegCoilFactor', alpha, ...
-            'RegCompFactor', gamma, ...
-            'RegBoundary',   bnd, ...
-            'VoxelSize',     vs, ...
-            'SensOptim',     optim, ...
-            'LLPrior',       llp, ...
-            'Parallel',      Nw, ...
-            'SamplingMask',  mask);
-        if isdiag(A)
-            llm = llm + llm1;
-        else
-            llm = llm1;
-        end
-        if verbose > 0
-            if ok, fprintf(' :D (%d)\n', ls);
-            else,  fprintf(' :(\n')
+        llp  = zeros(1,Nc);
+        llm  = zeros(1,Nc);
+        Ad   = diag(A);
+        parfor(n=1:Nc, Nw)
+
+            [s(:,:,:,n),llm(n),llp(n),ok,ls] = multicoil_sensitivity(...
+                rho, x(:,:,:,n), s(:,:,:,n), ...
+                'Precision',     Ad(n),     ...
+                'RegStructure',  reg,       ...
+                'RegCoilFactor', alpha(n),  ...
+                'RegCompFactor', gamma,     ...
+                'RegBoundary',   bnd,       ...
+                'VoxelSize',     vs,        ...
+                'SensOptim',     optim,     ...
+                'LLPrior',       llp0(n),   ...
+                'SamplingMask',  mask);
+            if verbose > 0
+                if ok, fprintf(' [%2d :D (%d)]', n, ls);
+                else,  fprintf(' [%2d :(    ]', n);
+                end
             end
+
         end
-        
-        if verbose > 1
-            multicoil_plot_fit(n, x, s, rho, mask, vs)
+        llm = sum(llm);
+    else
+        if isdiag(A)
+            % We do not parallelise, but still need to sum individual 
+            % coil-wise log-likelihoods
+            llm = 0;
         end
-        
+        for n=1:Nc
+
+            if verbose > 0
+                if verbose > 1
+                    multicoil_plot_fit(n, x, s, rho, mask, vs);
+                end
+                if mod(n,4) == 1, fprintf('\n  | '); end
+                fprintf('%2d', n);
+            end
+            [s,llm1,llp,ok,ls] = multicoil_sensitivity(...
+                rho, x, s,              ...
+                'Index',         n,     ...
+                'Precision',     A,     ...
+                'RegStructure',  reg,   ...
+                'RegCoilFactor', alpha, ...
+                'RegCompFactor', gamma, ...
+                'RegBoundary',   bnd,   ...
+                'VoxelSize',     vs,    ...
+                'SensOptim',     optim, ...
+                'LLPrior',       sum(llp),   ...
+                'SamplingMask',  mask);
+            if isdiag(A)
+                llm = llm + llm1;
+            else
+                llm = llm1;
+            end
+            if verbose > 0
+                if ok, fprintf(' :D (%d) | ', ls);
+                else,  fprintf(' :(     | ');
+                end
+                if verbose > 1
+                    multicoil_plot_fit(n, x, s, rho, mask, vs);
+                end
+            end
+
+        end
     end
+    if verbose > 0, fprintf('\n'); end
     
     % Add normalisation term
-    llm = llm - sum(mask(:))/numel(mask)*size(x,1)*size(x,2)*size(x,3)*ldC;
+    llm = llm - propmask*Nvox*ldC;
     
     % ---------------------------------------------------------------------
     % Center sensitivity fields
@@ -338,49 +429,47 @@ for it=1:itermax
     % We know that, at the optimum, sum{alpha_n*s_n} = 0
     % To converge faster, and to avoid bias towards the initial mean
     % estimate, we enforce this condition at each iteration.
-    % Note that the log-likelihood changes slightly and might drop
+    meansen = zeros(Nx, Ny, Nz, 'like', s(1));
+    for n=1:Nc
+        meansen = meansen + alpha(n) * single(s(:,:,:,n));
+    end
+    for n=1:Nc
+        s(:,:,:,n) = s(:,:,:,n) - meansen;
+    end
+    clear meansen
+    % Zero-centering the sensitivity changes the conditional and prior
+    % terms of the og-likelihood.
+    % However, in practice, the impact is small, and updating the 
+    % log-likelihood is costly. Therefore, we keep it as is.
+    % This means that the log-likelihood changes slightly and might drop
     % during the first iterations.
-    sumsen = zeros(size(s,1),size(s,2),size(s,3),1,size(s,5),'single');
-    for n=1:N
-        sumsen = sumsen + alpha(n)*single(s(:,:,:,n,:));
-    end
-    for n=1:N
-        s(:,:,:,n,:) = s(:,:,:,n,:) - alpha(n) * sumsen;
-    end
-    % Should I update the log-likelihood? the prior part is easy to
-    % update, but the conditional part also changes, and this is
-    % slightly more costly to compute.
-    % It does not seem to matter much, so I'm not gonna update it.
-    % llpsum = multicoil_ll_prior(sumsen, reg, [gamma_mag(1) gamma_phase(1)], 1, bnd, [optim_mag(1) optim_phase(1)], vs);
-    % lp = llp - llpsum;
-    clear sumsen
     
-    for i=1:5
-        if verbose > 0
-            fprintf('> Update mean');
-        end
+    % ---------------------------------------------------------------------
+    % Update mean (Gauss-Newton)
+    % ---------------------------------------------------------------------
+    if verbose > 0, fprintf('> Update mean:\n '); end
+    for i=1:4
         [rho,llm,~,ok,ls] = multicoil_mean_map(...
-            x, s, rho, ...
-            'Precision',    A, ...
-            'RegFactor',    0, ...
+            x, s, rho,          ...
+            'Precision',    A,  ...
             'VoxelSize',    vs, ...
-            'Parallel',     Nw, ...
             'SamplingMask', mask);
         if verbose > 0
-            if ok, fprintf(' :D (%d)\n', ls);
-            else,  fprintf(' :(\n')
+            if ok, fprintf(' :D (%d) |', ls);
+            else,  fprintf(' :(     |');
             end
         end
         if verbose > 1
             multicoil_plot_mean(rho, C, ll, vs);
         end
    end
-   llm = llm - sum(mask(:))/numel(mask)*size(x,1)*size(x,2)*size(x,3)*ldC;
+   if verbose > 0, fprintf('\n'); end
+   llm = llm - propmask*Nvox*ldC;
     
     % ---------------------------------------------------------------------
     % Update log-likelihood
     % ---------------------------------------------------------------------
-    ll = [ll (llm+llp)];
+    ll = [ll (sum(llm)+sum(llp))];
     if verbose > 1
         multicoil_plot_mean(rho, C, ll, vs);
     end
@@ -389,7 +478,9 @@ for it=1:itermax
     % Check gain
     % ---------------------------------------------------------------------
     if it > 1
-        gain = (ll(end) - ll(end-1))/(max(ll(1:end), [], 'omitnan') - min(ll(1:end), [], 'omitnan'));
+        llmin = min(ll, [], 'omitnan');
+        llmax = max(ll, [], 'omitnan');
+        gain  = (ll(end) - ll(end-1))/(llmax-llmin);
         if verbose > 0
             switch sign(gain)
                 case  1,   sgn = '+';
