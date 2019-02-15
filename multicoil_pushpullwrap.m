@@ -6,6 +6,8 @@ function x = multicoil_pushpullwrap(x, msk, dirs, dom)
 % dom - Input and output domains can be image ('im') or frequency ('freq')
 %       [{'im' 'im'}]
 % y   - Pulled image [n1 n2 n3 n4 n5]
+%__________________________________________________________________________
+% Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
 if nargin < 4
     dom = {'im' 'im'};
@@ -29,41 +31,57 @@ end
 gpu_on = isa(msk, 'gpuArray');
 if gpu_on, loadarray = @loadarray_gpu;
 else,      loadarray = @loadarray_cpu; end
+gpu_in = isa(x, 'gpuArray');
 
-msk = reshape(msk, [], 1);
+invmsk = reshape(~msk, [], 1);
 
-for m=1:size(x,5) % echoes/contrasts
-for n=1:size(x,4) % coils/channels
-
-    % Read image
-    x1 = loadarray(x(:,:,:,n,m));
-    dim = [size(x1) 1 1];
-    
-    if strcmpi(dom{1}, 'im')
-        % FFT
-        for dir=dirs
-            x1 = ifftshift(x1,dir);
-            x1 = fft(x1,[],dir);
-            x1 = fftshift(x1,dir);
-        end
+if isa(x, 'file_array')
+    % Memory management seems to matters and load volumes one at a time
+    for m=1:size(x,5) % echoes/contrasts
+    for n=1:size(x,4) % coils/channels
+        x(:,:,:,n,m) = pushpull(loadarray(x(:,:,:,n,m)), invmsk, dirs, dom);
     end
-
-    % Decimate k-space
-    x1 = reshape(x1, numel(msk), []);
-    x1(~msk,:) = 0;
-    x1 = reshape(x1, dim);
-
-    if strcmpi(dom{1}, 'im')
-        % Inverse FFT
-        for dir=dirs
-            x1 = ifftshift(x1,dir);
-            x1 = ifft(x1,[],dir);
-            x1 = fftshift(x1,dir);
-        end
     end
-
-    % Save image
-    x(:,:,:,n,m) = x1;
-    
+else
+    % The volume is already on memory, so we can process it at once
+    x = pushpull(loadarray(x), invmsk, dirs, dom);
 end
+if ~gpu_in
+    x = gather(x);
+end
+
+
+function x = pushpull(x, invmsk, dirs, dom)
+
+% Performance note: On GPU, circshift is super slow. I did not find a nice
+% workaround, so better not to do anything on GPU for the moment.
+% Note that two circshift could be avoided by storing `ifftshift(mask)`
+% instead of `mask`. The remaining two circshift could be removed if we
+% used circulant boundary conditions rather than Neuman's for the
+% sensitivity fields, in which case we could always work with shifted
+% volumes.
+
+dim = size(x);
+
+if strcmpi(dom{1}, 'im')
+    % FFT
+    for dir=dirs
+        x = ifftshift(x,dir);
+        x = fft(x,[],dir);
+        x = fftshift(x,dir);
+    end
+end
+
+% Decimate k-space
+x = reshape(x, numel(invmsk), []);
+x(invmsk,:) = 0;
+x = reshape(x, dim);
+
+if strcmpi(dom{1}, 'im')
+    % Inverse FFT
+    for dir=dirs
+        x = ifftshift(x,dir);
+        x = ifft(x,[],dir);
+        x = fftshift(x,dir);
+    end
 end
