@@ -1,6 +1,7 @@
 function X = loadarray_gpu(X, convert)
-    if nargin < 2
-        convert = @(X) X;
+    if nargin > 1
+        X = gpuArray(convert(X()));
+    else
+        X = gpuArray(X());
     end
-    X = gpuArray(convert(X()));
 end

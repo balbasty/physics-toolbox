@@ -1,6 +1,5 @@
 function X = loadarray_cpu(X, convert)
-    if nargin < 2
-        convert = @(X) X;
+    if nargin > 1
+        X = convert(X());
     end
-    X = convert(X());
 end
