@@ -27,10 +27,9 @@ function [s,llm,llp,ok,ls] = multicoil_sensitivity(varargin)
 % VoxelSize     - Vector [3]       - Voxel size                    [1 1 1]
 % LLPrior       - Scalar           - Previous prior log-likelihood [NaN]
 % SensOptim     - [Mag Phase]      - Optimise magnitude/phase      [true true]
-% Parallel      - Scalar | Logical - Number of parallel workers    [false]
 % SamplingMask  - Array [Nx Ny]    - Mask of the sampling scheme   [ones]
 %
-% Encoding      - String           - Sensitivity encoding  'image'/['frequency']
+% Encoding      - String           - Sensitivity encoding   'freq'/['image']
 % NbBasis       - [Mx My Mz]       - Number of DCT bases           [10 10 10]
 % RegMatrix     - [NbBasis NbBasis]- Precomputed precision         []
 %
@@ -92,7 +91,6 @@ p.addParameter('RegBoundary',   1,           @isboundary);
 p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('LLPrior',       NaN,         @(X) isnumeric(X) && isscalar(X));
 p.addParameter('SensOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
-p.addParameter('Parallel',      0,           @(X) (isnumeric(X) || islogical(X)) && isscalar(X));
 p.addParameter('Encoding',      'image',     @ischar);
 p.addParameter('NbBasis',       [10 10 10],  @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('RegMatrix',     [],          @(X) isnumeric(X));
@@ -110,7 +108,6 @@ bnd         = p.Results.RegBoundary;
 vs          = p.Results.VoxelSize;
 llp         = p.Results.LLPrior;
 optim       = p.Results.SensOptim;
-Nw          = p.Results.Parallel;
 encoding    = p.Results.Encoding;
 nbasis      = p.Results.NbBasis;
 regmatrix   = p.Results.RegMatrix;
@@ -118,22 +115,26 @@ mask        = p.Results.SamplingMask;
 
 % -------------------------------------------------------------------------
 % Post-process input
-N   = size(x,4);                        % Number of coils
-lat = [size(x,1) size(x,2) size(x,3)];  % Fully sampled lattice
+Nc   = size(x,4);                        % Number of coils
+lat  = [size(x,1) size(x,2) size(x,3)];  % Fully sampled lattice
+Nvox = prod(lat);                        % Number of (fully smpled) voxels
+Nx   = lat(1);
+Ny   = lat(2);
+Nz   = lat(3);
 % Coils to process: default = all + ensure row-vector
 if isempty(all_n)
-    all_n = 1:N;
+    all_n = 1:Nc;
 end
 all_n = all_n(:).';
 % Precision: default = identity
 if numel(A) == 1
-    A = A * eye(N);
+    A = A * eye(Nc);
 end
 diagprec = isdiag(A);
 % Reg components: just change reg structure
 gamma = padarray(gamma(:)', [0 max(0,2-numel(gamma))], 'replicate', 'post');
 % Reg factor: ensure zero sum -> propagate their sum to reg components
-alpha = padarray(alpha(:), [max(0,N-numel(alpha)) 0], 'replicate', 'post');
+alpha = padarray(alpha(:), [max(0,Nc-numel(alpha)) 0], 'replicate', 'post');
 gamma = gamma * sum(alpha);
 alpha = alpha/sum(alpha);
 % Boundary: convert to scalar representation
@@ -167,16 +168,6 @@ if all(~optim)
     warning('Nothing to update')
     return
 end
-% Parallel: convert to number of workers
-if islogical(Nw)
-    if Nw, Nw = inf;
-    else,  Nw = 0;
-    end
-end
-% if Nw > 0
-%     warning('Parallel processing not implemented. Running sequential instead.')
-%     Nw = 0;
-% end
 
 % -------------------------------------------------------------------------
 % Boundary condition (usually Neumann = null derivative)
@@ -193,43 +184,35 @@ function llm = computellm(n,ds)
     if diagprec
         load_n = n;
     else
-        load_n = 1:N;
+        load_n = 1:Nc;
     end
-    A1 = A(load_n,load_n);
+    A1  = A(load_n,load_n);
+    Nc1 = numel(load_n);
     llm = 0;
     % ---------------------------------------------------------------------
-    % Compute gradient slice-wise to save memory
-    parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
-    % for z=1:lat(3)          % < Uncomment for sequential processing
+    % Compute log-likelihood slice-wise to save memory
+    for z=1:Nz
 
-        % -----------------------------------------------------------------
-        % Enforce boundary condition -> needed with parfor
-        spm_field('boundary', bnd); 
-
+        
         % -----------------------------------------------------------------
         % Load one slice of the complete coil dataset
-        xz = loadarray(x(:,:,z,load_n), @double);
+        xz = loadarray(x(:,:,z,load_n), @single);
         xz = reshape(xz, [], numel(load_n));
 
         % -----------------------------------------------------------------
         % Load one slice of the mean
-        rhoz = loadarray(rho(:,:,z,:), @double);
+        rhoz = loadarray(rho(:,:,z,:), @single);
         rhoz = reshape(rhoz, [], 1);
 
         % -----------------------------------------------------------------
         % Load one slice of the delta sensitivity
-        dsz   = loadarray(ds(:,:,z,:), @double);
-        dsz   = reshape(dsz, [], sum(optim));
-        if all(optim)
-            dsz = dsz(:,1) + 1i * dsz(:,2);
-        elseif optim(2)
-            dsz = 1i * dsz(:,2);
-        end
+        dsz   = loadarray(ds(:,:,z,:), @single);
+        dsz   = reshape(dsz, [], 1);
         
         % -----------------------------------------------------------------
         % Load one slice of the complete double dataset + correct
         sz      = loadarray(s(:,:,z,load_n), @single);
-        sz      = reshape(sz, [], numel(load_n));
+        sz      = reshape(sz, [], Nc1);
         if diagprec
             sz = sz - dsz;
         else
@@ -242,19 +225,18 @@ function llm = computellm(n,ds)
 
         % -----------------------------------------------------------------
         % If incomplete sampling: push+pull coil-specific means
-        prhoz = multicoil_pushpullwrap(reshape(rhoz, [lat(1:2) 1 numel(load_n)]),mask);
-        prhoz = reshape(prhoz, [], numel(load_n));
+        prhoz = multicoil_pushpullwrap(reshape(rhoz, [Nx Ny 1 Nc1]),mask);
+        prhoz = reshape(prhoz, [], Nc1);
         
         % -----------------------------------------------------------------
         % Compute log-likelihood
-        llm = llm - 0.5 * prod(lat) * (...
-                              sum(real(dot(rhoz,prhoz*A1,1))) ...
-                            - 2*sum(real(dot(rhoz,xz*A1,1))));
+        llm = llm - sum(double(real(dot(rhoz,(prhoz-2*xz)*A1,1))));
         
         rhoz  = [];
         prhoz = [];
         xz    = [];
     end % < loop z
+    llm = 0.5 * Nvox * llm;
 end % < function computellm
     
 % -------------------------------------------------------------------------
@@ -270,65 +252,59 @@ for n=all_n
     if diagprec
         load_n = n;
     else
-        load_n = 1:N;
+        load_n = 1:Nc;
     end
-    A1 = A(load_n,load_n);
+    A1  = A(load_n,load_n);
+    Nc1 = numel(load_n);
     
     % ---------------------------------------------------------------------
     % Allocate conjugate gradient and Hessian
     switch lower(encoding)
         case 'image'
-            g   = zeros([lat sum(optim)], 'single');
-            H   = zeros(lat, 'single');
+            g   = zeros([lat sum(optim)], 'like', loadarray(single(1)));
+            H   = zeros(lat, 'like', loadarray(single(1)));
         case 'frequency'
-            g   = zeros([nbasis sum(optim)], 'single');
-            H   = zeros([nbasis nbasis], 'single');
+            g   = zeros([nbasis sum(optim)], 'like', loadarray(single(1)));
+            H   = zeros([nbasis nbasis], 'like', loadarray(single(1)));
     end
     llm = 0;
     
     % ---------------------------------------------------------------------
     % Compute gradient slice-wise to save memory
-    parfor(z=1:lat(3) , Nw) % < Uncomment for parallel processing
-    % for z=1:lat(3)          % < Uncomment for sequential processing
-
-        % -----------------------------------------------------------------
-        % Enforce boundary condition -> needed with parfor
-        spm_field('boundary', bnd); 
+    for z=1:Nz
         
         % -----------------------------------------------------------------
         % Load one slice of the complete coil dataset
-        xz = loadarray(x(:,:,z,load_n), @double);
+        xz = loadarray(x(:,:,z,load_n), @single);
         xz = reshape(xz, [], numel(load_n));
 
         % -----------------------------------------------------------------
         % Load one slice of the mean
-        rhoz = loadarray(rho(:,:,z,:), @double);
+        rhoz = loadarray(rho(:,:,z,:), @single);
         rhoz = reshape(rhoz, [], 1);
 
         % -----------------------------------------------------------------
         % Load one slice of the complete sensitivity dataset + correct
-        sz   = loadarray(s(:,:,z,load_n), @double);
-        sz   = reshape(sz, [], numel(load_n));
+        sz   = loadarray(s(:,:,z,load_n), @single);
+        sz   = reshape(sz, [], Nc1);
         sz   = exp(sz);
         rhoz = bsxfun(@times, rhoz, sz);
         sz   = []; % clear
         
         % -----------------------------------------------------------------
         % If incomplete sampling: push+pull coil-specific means
-        prhoz = multicoil_pushpullwrap(reshape(rhoz, [lat(1:2) 1 numel(load_n)]),mask);
-        prhoz = reshape(prhoz, [], numel(load_n));
+        prhoz = multicoil_pushpullwrap(reshape(rhoz, [Nx Ny 1 Nc1]),mask);
+        prhoz = reshape(prhoz, [], Nc1);
         
         % -----------------------------------------------------------------
         % Compute gradient
-        llm = llm - 0.5 * prod(lat) * (...
-                              sum(real(dot(rhoz,prhoz*A1,1))) ...
-                            - 2*sum(real(dot(rhoz,xz*A1,1))));
+        llm = llm - sum(double(real(dot(rhoz,(prhoz-2*xz)*A1,1))));
         
         tmp = (prhoz - xz) * A1;
         if diagprec
-            tmp = prod(lat) * conj(rhoz) .* tmp;
+            tmp = Nvox * conj(rhoz) .* tmp;
         else
-            tmp = prod(lat) * conj(rhoz(:,n)) .* tmp(:,n);
+            tmp = Nvox * conj(rhoz(:,n)) .* tmp(:,n);
         end
         
         gz = zeros([size(tmp,1) sum(optim)], 'like', real(tmp(1)));
@@ -341,35 +317,35 @@ for n=all_n
             gz(:,i) = imag(tmp);
         end
         
-        % tmp = prhoz * A;
-        % Hz  = prod(lat) * real(conj(rhoz(:,n)) .* tmp(:,n));
         if diagprec
-            Hz  = prod(lat) * A1 * real(conj(rhoz) .* prhoz);
+            Hz  = Nvox * A1 * real(conj(rhoz) .* prhoz);
         else
-            Hz  = prod(lat) * A(n,n) * real(conj(rhoz(:,n)) .* prhoz(:,n));
+            Hz  = Nvox * A(n,n) * real(conj(rhoz(:,n)) .* prhoz(:,n));
         end
         
         switch lower(encoding)
             case 'image'
-                g(:,:,z,:)  = reshape(gz, lat(1), lat(2), 1, []);
+                g(:,:,z,:)  = reshape(gz, Nx, Ny, 1, []);
                 gz          = []; % clear
-                H(:,:,z)    = reshape(Hz, lat(1), lat(2));
+                H(:,:,z)    = reshape(Hz, Nx, Ny, 1);
                 Hz          = []; % clear
             case 'frequency'
-                error('Commented out to allow parfor')
-%                 b3z = B3(z,:);
-%                 gz  = reshape(gz, lat(1), lat(2), 1, []);
-%                 gz  = dct(gz, [], 1);
-%                 gz  = gz(1:nbasis(1),:,:,:);
-%                 gz  = dct(gz, [], 2);
-%                 gz  = gz(:,1:nbasis(2),:,:);
-%                 gz  = bsxfun(@times, gz, reshape(b3z, 1, 1, []));
-%                 g   = g + gz;
-%                 gz  = []; % clear
-%                 Hz  = reshape(Hz, lat(1), lat(2));
-%                 Hz  = kron(b3z'*b3z,spm_krutil(double(Hz),B1,B2,1));
-%                 H   = H + reshape(Hz, [nbasis nbasis]);
-%                 Hz  = []; % clear
+                b3z = B3(z,:);
+                gz  = reshape(gz, Nx, Ny, 1, []);
+                gz  = gather(gz); % dct only defined for CPU arrays
+                gz  = dct(gz, [], 1);
+                gz  = gz(1:nbasis(1),:,:,:);
+                gz  = dct(gz, [], 2);
+                gz  = gz(:,1:nbasis(2),:,:);
+                gz  = loadarray(gz); % Back to GPU
+                gz  = bsxfun(@times, gz, reshape(b3z, 1, 1, []));
+                g   = g + gz;
+                gz  = []; % clear
+                Hz  = reshape(Hz, Nx, Ny, 1);
+                Hz  = gather(Hz); % spm_krutil only defined for CPU arrays
+                Hz  = kron(b3z'*b3z,spm_krutil(double(Hz),B1,B2,1));
+                H   = H + reshape(Hz, [nbasis nbasis]);
+                Hz  = []; % clear
         end
         
         tmp   = []; % clear
@@ -377,6 +353,7 @@ for n=all_n
         rhoz  = []; % clear
         prhoz = []; % clear
     end % < loop z
+    llm = 0.5 * Nvox * llm;
     
     
     switch lower(encoding)
@@ -389,7 +366,7 @@ for n=all_n
             % -------------------------------------------------------------
             % Gradient: add prior term
             if all(optim)
-                s0 = zeros([lat 2], 'single');
+                s0 = zeros([lat 2], 'like', single(s(1)));
                 s1 = single(s(:,:,:,n));
                 s0(:,:,:,1) = real(s1);
                 s0(:,:,:,2) = imag(s1);
@@ -399,7 +376,7 @@ for n=all_n
             elseif optim(2)
                 s0 = imag(single(s(:,:,:,n)));
             end
-            g  = g + spm_field('vel2mom', s0, [vs alpha(n)*prm], gamma(optim));
+            g  = g + spm_field('vel2mom', single(gather(s0)), [vs alpha(n)*prm], gamma(optim));
 
             % -------------------------------------------------------------
             % Gauss-Newton
@@ -452,7 +429,7 @@ for n=all_n
             s0 = dct(s0,[],3);
             s0 = s0(:,:,1:nbasis(3),:);
             s0 = reshape(s0, [], sum(optim));
-            s0 = double(s0);
+            s0 = loadarray(s0, @double); % Load on GPU
             
             i = 1;
             if optim(1)
@@ -465,7 +442,7 @@ for n=all_n
             
             % -------------------------------------------------------------
             % Gauss-Newton
-            ds = zeros(size(s0), 'double');
+            ds = zeros(size(s0), 'like', gpuArray(double(1)));
             i  = 1;
             if optim(1)
                 ds(:,i) = (H + alpha(n) * gamma(1) * regmatrix)\g(:,i);
@@ -506,6 +483,12 @@ for n=all_n
             ds = reshape(B2 * reshape(ds, nbasis(3), []), lat(3), lat(1), lat(2), []);
             ds = permute(ds, [2 3 1 4]);
     end
+    
+    if all(optim)
+        ds = complex(ds(:,:,:,1),ds(:,:,:,2));
+    elseif optim(2)
+        ds = complex(0,ds);
+    end
             
     % ---------------------------------------------------------------------
     % Line-Search
@@ -514,36 +497,31 @@ for n=all_n
     ok     = false;
     armijo = 1;
     for ls=1:12
-        
+
         % -----------------------------------------------------------------
         % Compute log-likelihood (prior)
         llp = -0.5 * (armijo^2 * llp_part2 - 2 * armijo * llp_part1);
         llp = llp0 + llp;
-        
+
         % -----------------------------------------------------------------
         % Compute log-likelihood (conditional)
         llm = computellm(n, armijo*ds);
-        
+
         % -----------------------------------------------------------------
         % Check progress
-        if (llm+llp) > (llm0+llp0)
+        if (llm+llp) >= (llm0+llp0)
             ok = true;
             break
         else
             armijo = armijo/2;
         end
-        
+
     end % < loop ls
     
     % ---------------------------------------------------------------------
     % Save
     if ok
-        if all(optim)
-            ds = ds(:,:,:,1) + 1i * ds(:,:,:,2);
-        elseif optim(2)
-            ds = 1i * ds;
-        end
-        s(:,:,:,n) = s(:,:,:,n) - armijo * ds;
+        s(:,:,:,n) = s(:,:,:,n) - armijo * gather(ds);
     else
         llm = llm0;
         llp = llp0;
