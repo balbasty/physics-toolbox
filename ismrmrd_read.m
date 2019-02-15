@@ -263,7 +263,8 @@ dataLines  = ismrmrd_read_member(fname, {'data' 'head'}, find(mask));
 rd_size    = max(dataLines.head.number_of_samples);
 ch_size    = max(dataLines.head.available_channels);
 dataLines  = cat(2, dataLines.data{:});
-dataLines  = reshape(dataLines, 2, rd_size, ch_size, []);
+dataLines  = reshape(dataLines, 2, rd_size, ch_size, []); % [r/i rd ch ...]
+dataLines  = permute(dataLines, [3 2 4 1]);               % [ch rd ... r/i]
 
 % -------------------------------------------------------------------------
 % Remove unwanted channels and samples 
@@ -272,8 +273,10 @@ dataLines  = reshape(dataLines, 2, rd_size, ch_size, []);
 if verbose, fprintf('Select samples and channels\n'); end
 if isempty(rd_out), rd_out = 1:rd_size; else, rd_size = numel(rd_out); end
 if isempty(ch_out), ch_out = 1:ch_size; else, ch_size = numel(ch_out); end
-dataLines = dataLines(:,rd_out,ch_out,:);
-dataLines = permute(dataLines(1,:,:,:) + 1i * dataLines(2,:,:,:), [3 2 4 1]);
+if numel(ch_out) ~= size(dataLines,1) || numel(rd_out) ~= size(dataLines,2)
+    dataLines = dataLines(ch_out,rd_out,ch_out,:,:);
+end
+dataLines = complex(dataLines(:,:,:,1),dataLines(:,:,:,2));
 
 % -------------------------------------------------------------------------
 % Allocate output + populate 
