@@ -15,4 +15,4 @@ lat0 = lat0(1:3);
 
 s = dct(dct(dct(s, [], 1), [], 2), [], 3);
 s = idct(idct(idct(s, lat(1), 1), lat(2), 2), lat(3), 3);
-s = s * sqrt(prod(lat)*prod(lat0));
+s = s * sqrt(prod(lat)/prod(lat0));
