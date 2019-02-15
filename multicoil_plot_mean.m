@@ -2,12 +2,6 @@ function multicoil_plot_mean(rho, C, ll, vs, figname)
 % FORMAT multicoil_plot_mean(rho, C, ll, (vs), (figname))
 
 % -------------------------------------------------------------------------
-% Set path
-path = fileparts(which('multicoil_plot_mean'));
-addpath(fullfile(path, 'colormaps'));
-addpath(fullfile(path, 'phasemap'));
-
-% -------------------------------------------------------------------------
 % Default parameters
 if nargin < 5
     figname = 'Multicoil mean';
@@ -32,8 +26,8 @@ rho1 = double(rho(:,:,z,:));
 % -------------------------------------------------------------------------
 % Magnitude
 p = subplot(2,3,1);
-h = imagesc(abs(rho1));
-caxis(p, [0 max(abs(rho1(:)))]);
+h = imagesc(abs(rho1)); colorbar
+caxis(p, gather([0 max(abs(rho1(:)))]));
 colormap(h.Parent, 'gray')
 daspect(h.Parent, vs);
 axis off
@@ -42,7 +36,7 @@ title('magnitude')
 % -------------------------------------------------------------------------
 % Phase
 p = subplot(2,3,2);
-h = imagesc(angle(rho1));
+h = imagesc(angle(rho1)); colorbar
 caxis(p, [-pi pi]);
 colormap(h.Parent, phasemap(128));
 daspect(h.Parent, vs);
@@ -53,7 +47,7 @@ title('phase')
 % Real
 p = subplot(2,3,4);
 h = imagesc(real(rho1));
-caxis(p, [min(real(rho1(:))) max(real(rho1(:)))]);
+caxis(p, gather([min(real(rho1(:))) max(real(rho1(:)))]));
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -63,7 +57,7 @@ title('real')
 % Imag
 p = subplot(2,3,5);
 h = imagesc(imag(rho1));
-caxis(p, [min(imag(rho1(:))) max(imag(rho1(:)))]);
+caxis(p, gather([min(imag(rho1(:))) max(imag(rho1(:)))]));
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -73,7 +67,7 @@ title('imag')
 % Covariance
 p = subplot(2,3,3);
 h = imagesc(C); colorbar
-caxis(p, [min(C(:)) max(C(:))]);
+caxis(p, gather([min(C(:)) max(C(:))]));
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, [1 1 1]);
 title('covariance')

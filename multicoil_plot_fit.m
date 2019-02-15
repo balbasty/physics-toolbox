@@ -2,12 +2,6 @@ function multicoil_plot_fit(n, x, s, rho, msk, vs, figname, movie, it)
 % FORMAT multicoil_plot_fit(n, x, s, rho, (vs), (figname))
 
 % -------------------------------------------------------------------------
-% Set path
-path = fileparts(which('multicoil_plot_fit'));
-addpath(fullfile(path, 'colormaps'));
-addpath(fullfile(path, 'phasemap'));
-
-% -------------------------------------------------------------------------
 % Default parameters
 if nargin < 9
     it = NaN;
@@ -58,7 +52,7 @@ obsfitres = [x1 foldedfit res];
 % Magnitude
 p = subplot(2,2,1);
 h = imagesc(abs(obsfit));
-caxis(p, [0 max(abs(obsfit(:)))]);
+caxis(p, gather([0 max(abs(obsfit(:)))]));
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -84,7 +78,7 @@ title(strtitle)
 % Real
 p = subplot(2,2,3);
 h = imagesc(real(obsfitres));
-caxis(p, [min(real(obsfitres(:))) max(real(obsfitres(:)))]);
+caxis(p, gather([min(real(obsfitres(:))) max(real(obsfitres(:)))]));
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -97,7 +91,7 @@ title(strtitle)
 % Real
 p = subplot(2,2,4);
 h = imagesc(imag(obsfitres));
-caxis(p, [min(imag(obsfitres(:))) max(imag(obsfitres(:)))]);
+caxis(p, gather([min(imag(obsfitres(:))) max(imag(obsfitres(:)))]));
 colormap(h.Parent, viridis(128));
 daspect(h.Parent, vs);
 axis off
