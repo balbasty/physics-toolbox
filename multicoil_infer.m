@@ -129,6 +129,10 @@ ll            = p.Results.LLPrev;
 Nw            = p.Results.Parallel;
 mask          = p.Results.SamplingMask;
 
+if optim_cov
+    warning('Covariance inference is deactivated for now.')
+end
+
 % -------------------------------------------------------------------------
 % Time execution
 % -------------------------------------------------------------------------
@@ -221,6 +225,7 @@ if init_rho
         'Precision',    A,  ...
         'VoxelSize',    vs, ...
         'SamplingMask', mask);
+    llm = llm - propmask*Nvox*ldC;
     if verbose > 0
         if ok, fprintf(' :D (%d)\n', ls);
         else,  fprintf(' :(\n');
@@ -249,6 +254,7 @@ if verbose > 1
     multicoil_plot_mean(rho, C, ll, vs);
 end
 if init_s
+    llp = 0;
     for i=1:3
         if verbose > 0
             fprintf('> Update sensitivity\n');
@@ -267,6 +273,7 @@ if init_s
                 'Precision',    A,  ...
                 'VoxelSize',    vs, ...
                 'SamplingMask', mask);
+            llm = llm - propmask*Nvox*ldC;
             if verbose > 0
                 if ok, fprintf(' :D (%d)\n', ls);
                 else,  fprintf(' :(\n');
@@ -289,9 +296,9 @@ if isnan(llp)
 end
 if isnan(llm)
     % > Initial log-likelihood (cond term)
-    llm = multicoil_ll_cond(x,s,rho,A) - propmask*Nvox*ldC;
+    llm = multicoil_ll_cond(x,s,rho,A,mask) - propmask*Nvox*ldC;
 end
-% ll = [ll (llm+llp)];
+ll = [ll (sum(llm)+sum(llp))];
 
 if verbose > 1
     multicoil_plot_mean(rho, C, ll, vs);
@@ -318,10 +325,10 @@ for it=1:itermax
         end
     end
     
-%     % ---------------------------------------------------------------------
-%     % Update mean/covariance (closed-form)
-%     % ---------------------------------------------------------------------
-%     if optim_cov(1)
+    % ---------------------------------------------------------------------
+    % Update mean/covariance (closed-form)
+    % ---------------------------------------------------------------------
+%     if optim_cov
 %         if verbose > 0
 %             fprintf('> Update Covariance\n');
 %         end
