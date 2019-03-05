@@ -1,6 +1,4 @@
 function [Z,cluster,prop,lb] = loop(obs, cluster, prop, varargin)
-%__________________________________________________________________________
-%
 % Fit a [Bayesian] Gaussian mixture model to observed [weighted] data.
 %
 % This function is the core of the fitting process. However, it needs all

@@ -1,7 +1,8 @@
 function schema = schema(fname)
+% Read the ISMRMRD XML schema into a matlab structure.
+%
 % FORMAT obj = ismrmrd.schema(in)
 %
-% Read the ISMRMRD XML schema into a matlab structure.
 % The input can be the path to an XSD file, an XSD string or a DOM object.
 % The output is a structure.
 %__________________________________________________________________________

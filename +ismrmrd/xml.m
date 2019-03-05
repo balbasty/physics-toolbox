@@ -1,7 +1,8 @@
 function header = xml(fname, schema)
+% Read the flexible header of an ismrmrd file into a structure.
+%
 % FORMAT header = ismrmrd.xml(in,[schema])
 %
-% Read the flexible header of an ismrmrd file into a structure.
 % The input can be the path to an H5 or XML file, an XML string or a 
 % DOM object.
 % An XML schema can be provided to validate the XML. By default, th ISMRMRD

@@ -1,4 +1,6 @@
 function x = adjoint_forward(x, msk, dirs, dom)
+% Subsample the k-space and sends back data to image space.
+%
 % FORMAT y = b1m.adjoint_forward(x,msk,[dir],[dom])
 % x   - Non-wrapped image [n1 n2 n3 n4 n5]
 % msk - Mask of the k-space sampling scheme [n1 n2 (n3)]

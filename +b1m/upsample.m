@@ -1,7 +1,7 @@
 function s = upsample(s, lat)
-% FORMAT s = b1m.upsample(s, lat)
+% Upsample the sensitivity fields to a given lattice.
 %
-% Upsample the sensitivity fields to the provided lattice.
+% FORMAT s = b1m.upsample(s, lat)
 %
 % This upsampling is obtained by performing a discrete cosine transform (in
 % order to keep Neumann's boundary conditions), zero-padding, and

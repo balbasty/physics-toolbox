@@ -1,6 +1,4 @@
 function varargout = fit(X, varargin)
-%__________________________________________________________________________
-%
 % Fit a [Bayesian] Gaussian mixture model to observed [weighted] data.
 %
 % FORMAT [Z,MU,A,PI,...] = utils.gmm.fit(X,...)

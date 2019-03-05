@@ -1,4 +1,6 @@
 function [obj,nblines] = read_member(fname, members, idx)
+% Read specific members of a subset k-space lines.
+%
 % FORMAT header = ismrmrd.read_member(fname, members, idx)
 %
 % fname   - Path to the H5 file.
@@ -10,8 +12,6 @@ function [obj,nblines] = read_member(fname, members, idx)
 %           * If empty: read all members [default]
 % idx     - Indices of elements to read (0-indexing)
 %           * If empty: read all elements [default]
-%
-% Read specific members of a subset k-space lines.
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
