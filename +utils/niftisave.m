@@ -115,8 +115,8 @@ function dtype = map_type(mtype,isreal)
             case 'double'
                 dtype = 'complex128';
             otherwise
-                warning('Complex data type %s not handled. Using complex32 instead.', mtype);
-                dtype = 'complex32';
+                warning('Complex data type %s not handled. Using complex64 instead.', mtype);
+                dtype = 'complex64';
         end
     end
 end
