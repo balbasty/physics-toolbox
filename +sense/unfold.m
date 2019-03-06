@@ -1,4 +1,44 @@
 function recon = unfold(varargin)
+% Unfold a subsampled acquisition using pre-computed sensitivity fields.
+%
+% FORMAT recon = SENSE.unfold(coils, sens, ...)
+%
+% REQUIRED
+% --------
+% coils - (File)Array [Nc Nx Ny Nz Nct] - Undersampled k-space data
+% sens  - (File)Array [Nc Nx Ny Nz Nct] - Sensitivity fields
+%
+% Nc  = Coils
+% Nx  = Phase-encoding direction 1
+% Ny  = Phase-encoding direction 2 /or/ slice
+% Nz  = Frequency readout
+% Nct = Contrasts
+%
+% KEYWORD
+% -------
+% CoilCompact  - Is k-space stored compactely?              [true]
+% CoilSpace    - Frequency (=0) or image (=1) space of      [0]
+%                each dimension
+% SensLog      - Sensitivities in log-space?                [true]
+% SensPInv     - Are sensitivities already pseudo-inverted? [false]
+% ReconMatrix  - Reconstruction matrix                      [Nan=auto]
+% Acceleration - Acceleration factor [k1 k2]                [Nan=auto]
+% Precision    - Noise precision matrix                     [1=identity]
+% Contrast     - Contrast to unfold                         [Inf=all]
+% Parallel     - Number of parallel workers                 [Inf]
+% Verbose      - Verbosity level                            [0]
+% 
+% OUTPUT
+% ------
+% recon - (File)Array [Nx Ny Nz Nct] - Reconstructed volume
+%__________________________________________________________________________
+% Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
+
+% =========================================================================
+%
+%                       PARSE AND PROCESS ARGUMENTS
+%
+% =========================================================================
 
 % -------------------------------------------------------------------------
 % Helper functions
@@ -11,57 +51,70 @@ end
 
 % -------------------------------------------------------------------------
 % Defaults
-sens        = [];
-A           = 1;
-coilorder   = {'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'st' 'sg'};
-sensorder   = {'k1' 'k2' 'rd' 'ch'};
-af          = NaN;
-coilcompact = true;
-lat_acq     = NaN;
-fov_acq     = NaN;
-lat_recon   = NaN;
-fov_recon   = NaN;
-contrasts   = 1;
-senscontrast= 1;
-verbose     = 0;
-parallel    = 0;
+coil_compact = true;
+coil_space   = 0;
+sens_log     = true;
+sens_pinv    = false;
+recon_lat    = NaN;
+af           = NaN;
+precision    = 1;
+contrasts    = 1;
+verbose      = 0;
+parallel     = Inf;
 
 % -------------------------------------------------------------------------
 % Parse input
 p = inputParser;
 p.FunctionName = 'sense.unfold';
-p.addRequired('CoilKSpace',                       @(X) ischar(X) || isarray(X));
-p.addParameter('SensMaps',          sens,         @isarray);
-p.addParameter('Precision',         A,            @isnumeric);
-p.addParameter('CoilOrder',         coilorder,    @iscell);
-p.addParameter('SensOrder',         sensorder,    @iscell);
-p.addParameter('CoilCompact',       coilcompact,  @isboolean);
+p.addRequired('CoilKSpace',                       @isarray);
+p.addRequired('SensMaps',                         @isarray);
+p.addParameter('CoilCompact',       coil_compact, @isboolean);
+p.addParameter('CoilSpace',         coil_space,   @isnumeric);
+p.addParameter('SensLog',           sens_log,     @isboolean);
+p.addParameter('SensPInv',          sens_pinv,    @isboolean);
+p.addParameter('ReconMatrix',       recon_lat,    @isnumeric);
 p.addParameter('Acceleration',      af,           @isnumeric);
-p.addParameter('AcquisitionMatrix', lat_acq,      @isnumeric);
-p.addParameter('AcquisitionFOV',    fov_acq,      @isnumeric);
-p.addParameter('ReconMatrix',       lat_recon,    @isnumeric);
-p.addParameter('ReconFOV',          fov_recon,    @isnumeric);
+p.addParameter('Precision',         precision,    @isnumeric);
 p.addParameter('Contrast',          contrasts,    @isnumeric);
-p.addParameter('SensContrast',      senscontrast, @isnumeric);
 p.addParameter('Parallel',          parallel,     @isboolean);
 p.addParameter('Verbose',           verbose,      @isboolean);
 p.parse(varargin{:});
 rdata        = p.Results.CoilKSpace;
 sens         = p.Results.SensMaps;
+coil_compact = p.Results.CoilCompact;
+coil_space   = p.Results.CoilSpace;
+sens_log     = p.Results.SensLog;
+sens_pinv    = p.Results.SensPInv;
+recon_lat    = p.Results.ReconMatrix;
 af           = p.Results.Acceleration;
-A            = p.Results.Precision;
-coilorder    = p.Results.CoilOrder;
-sensorder    = p.Results.SensOrder;
-coilcompact  = p.Results.CoilCompact;
-lat_acq      = p.Results.AcquisitionMatrix;
-fov_acq      = p.Results.AcquisitionFOV;
-lat_recon    = p.Results.ReconMatrix;
-fov_recon    = p.Results.ReconFOV;
+precision    = p.Results.Precision;
 contrasts    = p.Results.Contrast;
-senscontrast = p.Results.SensContrast(:)';
-parallel     = p.Results.Parallel;
 verbose      = p.Results.Verbose;
+parallel     = p.Results.Parallel;
 
+
+% -------------------------------------------------------------------------
+% Preprocess arguments
+
+% Sanity check dimensions
+if size(rdata,1) ~= size(sens,1)
+    error(['Number of coils is different between sensitivities and ' ...
+           'k-space data (%d ~= %d)'], size(sens,1), size(rdata,1));
+end
+Nc = size(rdata, 1); % Number of coils
+
+% Pad coil space
+if isempty(coil_space), coil_space = 0; end
+coil_space = padarray(coil_space(:)', [0 max(0, 3-numel(coil_space))], ...
+                      'replicate', 'post');
+
+% Precision
+if isempty(precision), precision = 1; end
+if size(precision,1) == 1 || size(precision,2) == 1
+    precision = padarray(precision(:)', [0 max(Nc,Nc-numel(precision))], ...
+                         'replicate', 'post');
+    precision = diag(precision);
+end
 
 % Parallel processing
 if isnan(parallel)
@@ -72,115 +125,117 @@ if ~isfinite(parallel)
     parallel = parallel.NumWorkers;
 end
 
-% -------------------------------------------------------------------------
-% Estimate senstivity
-if isempty(sens)
-    if ischar(rdata)
-        acdata = ismrmrd_read(rdata, ...
-                              'contrast', senscontrast, ...
-                              'subpart',  'autocalib');
-        % order: [ch rd k1 k2]
-        acdata = utils.ifft(acdata, [2 3 4]);
-        acdata = permute(acdata, [3 4 2 1]); % < order: [k1 k2 rd ch]
-        acdim  = size(acdata);
-        sens   = zeros([acdim 2],        'like', acdata);
-        acmean = zeros([acdim(1:3) 1 2], 'like', acdata);
-        [C,A] = b1m.init.noise(acdata);
-        [sens,acmean,A,ll] = b1m.fit(acdata, ...
-            'SensMaps',      sens, ...
-            'MeanImage',     acmean, ...
-            'Precision',     A, ...
-            'RegCompFactor', 1E7, ...
-            'VoxelSize',     [4.48 5.6 6.4], ...
-            'Verbose',       1);
+% Sanity check on SensLog/SensPInv
+if sens_log && sens_pinv
+    warning(['Options Senslog and SensPInv are both set to true, '    ...
+             'which is contradictory. I will assume SensPInv = true ' ...
+             'and SensLog = false']);
+    sens_log = false;
+end
+
+% Reconstruction matrix
+recon_lat = padarray(recon_lat(:)', [0 max(0, 3-numel(recon_lat))], ...
+                     'replicate', 'post');
+if ~isfinite(recon_lat(1)) % k1
+    if ~coil_compact
+        recon_lat(1) = size(rdata,2);
     else
-        error('Calibration data needed to estimate sensitivity maps')
+        if isfinite(af(1))
+            recon_lat(1) = size(rdata,2)*af(1);
+            if mod(recon_lat(1),2) == 1
+                recon_lat(1) = recon_lat(1) + 1;
+            end
+        else
+            error(['Cannot determine the reconstruction matrix based ' ...
+                   'on the provided inputs.']);
+        end
     end
 end
-
-% -------------------------------------------------------------------------
-% Convert log-sensitivity to frequency (Neumann conditions -> dct)
-sens    = permute(sens, [4 1 2 3]); % < order: [ch k1 k2 rd]
-sens    = dct(dct(dct(sens, [], 2), [], 3), [], 4);
-dimsens = size(sens);
-dimsens = dimsens(2:4);
-
-for contrast=contrasts
-
-% -------------------------------------------------------------------------
-% Read and reorganize acquired data
-if ischar(rdata)
-    fname = rdata;
-    rdata = ismrmrd.read(fname, ...
-                         'contrast', contrast, ...
-                         'subpart',  'cartesian', ...
-                         'compact',  true);
-    % order: [ch rd k1 k2]
+if ~isfinite(recon_lat(2)) % k2
+    if ~coil_compact
+        recon_lat(2) = size(rdata,3);
+    else
+        if isfinite(af(2))
+            recon_lat(2) = size(rdata,3)*af(2);
+            if mod(recon_lat(2),2) == 1
+                recon_lat(2) = recon_lat(2) + 1;
+            end
+        else
+            error(['Cannot determine the reconstruction matrix based ' ...
+                   'on the provided inputs.']);
+        end
+    end
 end
-% recon_lat = reconstruction matrix
-recon_lat    = size(rdata);
-recon_lat(1) = 1;
-recon_lat(3) = recon_lat(3) * af(1);
-recon_lat(4) = recon_lat(4) * af(2);
-recon_lat    = recon_lat([3 4 2]);
-rdata        = permute(rdata, [1 3 4 2]); % < order: [ch k1 k2 rd]
+if ~isfinite(recon_lat(3)) % rd
+    recon_lat(3) = size(rdata,4);
+end
 
 % -------------------------------------------------------------------------
-% Prepare a bit of stuff for sense
-
-% > Sampling scheme (k1/k2 are transposed compared to rdata order)
+% Sampling scheme (k1/k2 are transposed compared to internal order)
 msk = zeros(recon_lat(2),recon_lat(1),'logical'); % [k2 k1]
 msk(1:af(2):end,1:af(1):end) = 1;
 
-% > Aliasing locations and coefficients
+% -------------------------------------------------------------------------
+% Aliasing locations and coefficients
 msksp   = ifft2(ifftshift(msk));
 [k2,k1] = find(abs(msksp) > eps('single'));
 weights = double(msksp(abs(msksp) > eps('single')));
 
-% > ifft in readout direction (done once and for all)
-rdata = utils.ifft(rdata,4);
-% > idct in readout direction (done once and for all)
+% -------------------------------------------------------------------------
+% idct in readout direction (done once and for all)
+sens = b1m.upsample(single(sens()), [NaN NaN NaN recon_lat(3)]);
 
-sens = idct(sens, recon_lat(3), 4);
-sens = sens * sqrt(recon_lat(3)) / sqrt(dimsens(3));
+% =========================================================================
+%
+%                          LOOP OVER CONTRASTS
+%
+% =========================================================================
 
-% % > debug: test on a few slices
-% rdata = rdata(:,:,:,76:95);
-% sens  = sens(:,:,:,76:95,:);
-% sensmsk  = sensmsk(:,:,:,76:95);
-% ssq  = ssq(:,:,:,76:95);
-% recon_lat(3) = 20;
+for contrast=contrasts
+
+if verbose > 0
+    fprintf('Unfolding contrast %d...\n', contrast);
+end
+
+% -------------------------------------------------------------------------
+% Load one contrast
+rdata1 = single(rdata(:,:,:,:,contrast));
+
+% -------------------------------------------------------------------------
+% ifft in readout direction (done once and for all)
+if ~coil_space(3)
+    rdata1 = utils.ifft(rdata1,4);
+end
 
 % -------------------------------------------------------------------------
 % Reconstruction
 recon = zeros(recon_lat(1)*recon_lat(2),recon_lat(3), 'like', single(1i));
-ncoil = size(rdata,1);
 parfor(z=1:recon_lat(3), parallel)
-    % Acquired: read one slice (and expand to full matrix)
-    xz = zeros(ncoil,recon_lat(1),recon_lat(2),'like', double(1i));
-    xz(:,1:af(1):end,1:af(2):end) = rdata(:,:,:,z);
-    % Inverse Fourier to generate aliased image
-    xz = utils.ifft(xz, [2 3]);
-    % Sensitivity: read one slice 
-    sz = double(sens(:,:,:,z));
-    % Frequency -> Image
-    sz = idct(idct(sz,recon_lat(1),2),recon_lat(2),3);
-    sz = sz * sqrt(recon_lat(1)) / sqrt(dimsens(1)) ...
-            * sqrt(recon_lat(2)) / sqrt(dimsens(2));
-    % Exponentiate
-    sz = exp(sz);
+    % K-space
+    if coil_compact
+        xz = zeros([Nc recon_lat(1:2)],'like', double(1i));      % Allocate
+        xz(:,1:af(1):end,1:af(2):end) = rdata1(:,:,:,z);
+    else
+        xz = rdata1(:,:,:,z);
+    end
+    if ~coil_space(1), xz = utils.ifft(xz, 2); end
+    if ~coil_space(2), xz = utils.ifft(xz, 3); end
+    % Sensitivity: 
+    sz = double(sens(:,:,:,z));                            % Read one slice
+    sz = b1m.upsample(sz, [NaN recon_lat(1:2)]);       % Frequency -> Image
+    if sens_log, sz = exp(sz); end                           % Exponentiate
     % Whiten
-    xz = reshape(xz, ncoil, []);
-    sz = reshape(sz, ncoil, []);
-    xz = sqrt(A) * xz;
-    sz = sqrt(A) * sz;
-    xz = reshape(xz, [ncoil recon_lat(1:2)]);
-    sz = reshape(sz, [ncoil recon_lat(1:2)]);
+    xz = reshape(xz, Nc, []);
+    sz = reshape(sz, Nc, []);
+    xz = sqrt(precision) * xz;
+    sz = sqrt(precision) * sz;
+    xz = reshape(xz, [Nc recon_lat(1:2)]);
+    sz = reshape(sz, [Nc recon_lat(1:2)]);
     % SENSE inversion
-    recon(:,z) = sense.SENSEUnfold_v5(xz, sz, [k1 k2], [af(2) af(1)], false, weights);
+    recon(:,z) = SENSEUnfold_v5(xz, sz, [k1 k2], af(2:-1:1), sens_pinv, weights);
 end
 recon = reshape(recon,recon_lat);
-recon = permute(recon, [3 1 2]); % < order: [rd k1 k2]
+
 
 end % < contrast loop
 
