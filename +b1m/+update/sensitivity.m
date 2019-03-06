@@ -50,9 +50,17 @@ function [sens,llm,llp,ok,ls] = sensitivity(varargin)
 %
 % This file is a bit complicated, as it tries to deal with various
 % parameterisations of the sensitivity fields:
+% - Sensitivity fields can be encoded directly in image space or in 
+%   frequency space using discrete cosine basis functions.
 % - It is possible to update only one of the (log)-field components, using
 %   the `SensOptim` option. This also complicates stuff a bit.
 %__________________________________________________________________________
+
+% =========================================================================
+%
+%                       PARSE AND PROCESS ARGUMENTS
+%
+% =========================================================================
 
 % -------------------------------------------------------------------------
 % Helper functions to check input arguments
@@ -172,6 +180,13 @@ end
 % Boundary condition (usually Neumann = null derivative)
 spm_field('boundary', bnd); 
 
+
+% =========================================================================
+%
+%                NESTED FUNCTION FOR FASTER LINE-SEARCH
+%
+% =========================================================================
+
 % -------------------------------------------------------------------------
 % Prepare stuff to save time in the loop
 % --- GPU
@@ -236,7 +251,8 @@ function llm = computellm(n,ds)
     end % < loop z
     llm = 0.5 * Nvox * llm;
 end % < function computellm
-    
+
+
 % -------------------------------------------------------------------------
 % Compute log-likelihood (prior)
 if isnan(llp)
@@ -246,6 +262,12 @@ end
 % -------------------------------------------------------------------------
 % For each coil
 for n=all_n
+    
+    % =====================================================================
+    %
+    %                      COMPUTE GRADIENT AND HESSIAN
+    %
+    % =====================================================================
     
     if diagprec
         load_n = n;
@@ -345,7 +367,12 @@ for n=all_n
         clear tmp xz rz prz
     end % < loop z
     llm = 0.5 * Nvox * llm;
-    
+   
+    % =====================================================================
+    %
+    %                      COMPUTE GAUSS-NEWTON STEP
+    %
+    % =====================================================================
     
     switch lower(encoding)
         case 'image'
@@ -475,8 +502,14 @@ for n=all_n
         ds = complex(0,ds);
     end
             
+    % =====================================================================
+    %
+    %                             LINE-SEARCH
+    %
+    % =====================================================================
+    
     % ---------------------------------------------------------------------
-    % Line-Search
+    % Save previous values
     llm0   = llm;
     llp0   = llp;
     ok     = false;
@@ -502,6 +535,13 @@ for n=all_n
         end
 
     end % < loop ls
+    
+            
+    % =====================================================================
+    %
+    %                             WRITE OUTPUT
+    %
+    % =====================================================================
     
     % ---------------------------------------------------------------------
     % Save
