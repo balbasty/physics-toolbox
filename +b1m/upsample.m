@@ -12,9 +12,11 @@ function s = upsample(s, lat)
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
-lat0 = [size(s) 1];
-lat0 = lat0(1:3);
+lat0 = size(s);
+lat0 = padarray(lat0, [0 max(0,numel(lat)-numel(lat0))], 1, 'post');
 
-s = dct(dct(dct(s, [], 1), [], 2), [], 3);
-s = idct(idct(idct(s, lat(1), 1), lat(2), 2), lat(3), 3);
-s = s * sqrt(prod(lat)/prod(lat0));
+for i=1:numel(lat)
+    if isfinite(lat(i)) && (lat(i) ~= lat0(i))
+        s = sqrt(lat(i)/lat0(i)) * idct(dct(s,[],i),lat(i),i);
+    end
+end
