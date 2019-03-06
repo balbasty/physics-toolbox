@@ -41,15 +41,6 @@ function recon = unfold(varargin)
 % =========================================================================
 
 % -------------------------------------------------------------------------
-% Helper functions
-function ok = isarray(X)
-    ok = islogical(X) || isnumeric(X) || isa(X, 'file_array');
-end
-function ok = isboolean(X)
-    ok = (isnumeric(X) || islogical(X)) && isscalar(X);
-end
-
-% -------------------------------------------------------------------------
 % Defaults
 coil_compact = true;
 coil_space   = 0;
@@ -66,18 +57,18 @@ parallel     = Inf;
 % Parse input
 p = inputParser;
 p.FunctionName = 'sense.unfold';
-p.addRequired('CoilKSpace',                       @isarray);
-p.addRequired('SensMaps',                         @isarray);
-p.addParameter('CoilCompact',       coil_compact, @isboolean);
-p.addParameter('CoilSpace',         coil_space,   @isnumeric);
-p.addParameter('SensLog',           sens_log,     @isboolean);
-p.addParameter('SensPInv',          sens_pinv,    @isboolean);
-p.addParameter('ReconMatrix',       recon_lat,    @isnumeric);
-p.addParameter('Acceleration',      af,           @isnumeric);
-p.addParameter('Precision',         precision,    @isnumeric);
-p.addParameter('Contrast',          contrasts,    @isnumeric);
-p.addParameter('Parallel',          parallel,     @isboolean);
-p.addParameter('Verbose',           verbose,      @isboolean);
+p.addRequired('CoilKSpace',                  @utils.isarray);
+p.addRequired('SensMaps',                    @utils.isarray);
+p.addParameter('CoilCompact',  coil_compact, @utils.isboolean);
+p.addParameter('CoilSpace',    coil_space,   @isnumeric);
+p.addParameter('SensLog',      sens_log,     @utils.isboolean);
+p.addParameter('SensPInv',     sens_pinv,    @utils.isboolean);
+p.addParameter('ReconMatrix',  recon_lat,    @isnumeric);
+p.addParameter('Acceleration', af,           @isnumeric);
+p.addParameter('Precision',    precision,    @isnumeric);
+p.addParameter('Contrast',     contrasts,    @isnumeric);
+p.addParameter('Parallel',     parallel,     @utils.isboolean);
+p.addParameter('Verbose',      verbose,      @utils.isboolean);
 p.parse(varargin{:});
 rdata        = p.Results.CoilKSpace;
 sens         = p.Results.SensMaps;

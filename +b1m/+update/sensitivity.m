@@ -63,45 +63,25 @@ function [sens,llm,llp,ok,ls] = sensitivity(varargin)
 % =========================================================================
 
 % -------------------------------------------------------------------------
-% Helper functions to check input arguments
-function ok = isarray(X)
-    ok = isnumeric(X) || islogical(X) || isa(X, 'file_array');
-end
-function ok = isboundary(X)
-    ok = (isnumeric(X) && isscalar(X) && 0 <= X && X <= 1) || ...
-         (ischar(X)    && any(strcmpi(X, {'c','circulant','n','neumann'})));
-end
-function ok = isrealarray(X)
-    function okk = isrealtype(T)
-        okk = numel(T) > 7 || ~strcmpi(T(1:7),'complex');
-    end
-    if isa(X, 'file_array')
-        ok = all(cellfun(@isrealtype, {X.dtype}));
-    else
-        ok = isreal(X);
-    end
-end
-
-% -------------------------------------------------------------------------
 % Parse input
 p = inputParser;
 p.FunctionName = 'b1m.update.sensitivity';
-p.addRequired('MeanImage',                   @isarray);
-p.addRequired('CoilImages',                  @isarray);
-p.addRequired('SensMaps',                    @isarray);
+p.addRequired('MeanImage',                   @utils.isarray);
+p.addRequired('CoilImages',                  @utils.isarray);
+p.addRequired('SensMaps',                    @utils.isarray);
 p.addParameter('Index',         [],          @isnumeric);
 p.addParameter('Precision',     1,           @isnumeric);
 p.addParameter('RegStructure',  [0 0 1],     @(X) isnumeric(X) && numel(X) == 3);
 p.addParameter('RegCoilFactor', 1,           @isnumeric);
 p.addParameter('RegPartFactor', 1,           @(X) isnumeric(X) && numel(X) <= 2);
-p.addParameter('RegBoundary',   1,           @isboundary);
+p.addParameter('RegBoundary',   1,           @utils.isboundary);
 p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('LLPrior',       NaN,         @(X) isnumeric(X) && isscalar(X));
 p.addParameter('SensOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
 p.addParameter('Encoding',      'image',     @ischar);
 p.addParameter('NbBasis',       [10 10 10],  @(X) isnumeric(X) && numel(X) <= 3);
 p.addParameter('RegMatrix',     [],          @(X) isnumeric(X));
-p.addParameter('SamplingMask',  [],          @isarray);
+p.addParameter('SamplingMask',  [],          @utils.isarray);
 p.parse(varargin{:});
 mean        = p.Results.MeanImage;
 coils       = p.Results.CoilImages;
@@ -167,7 +147,7 @@ if strcmpi(encoding, 'frequency')
     [B1,B2,B3] = spm_bias_lib('dcbasis', lat, nbasis);
 end
 % Optimisation: if observed images are real, optim = [true false]
-if isrealarray(coils)
+if utils.isrealarray(coils)
     optim(2) = false;
 end
 optim = logical(optim);
