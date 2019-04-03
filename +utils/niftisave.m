@@ -1,4 +1,23 @@
 function niftisave(fname, vol, varargin)
+% Save a matlab array as Nifti file
+%
+% FORMAT niftisave(fname, vol, ...)
+%
+% REQUIRED
+% --------
+% fname   - File name
+% vol     - Matlab array
+%
+% KEYWORD
+% -------
+% mat     - Voxel to world matrix   [diag(vs)]
+% vs      - Voxel size              [from mat or [1 1 1]]
+% dtype   - file_array data type    [from array type]
+% slope   - nifti data slope        [1]
+% inter   - nifti data intercept    [0]
+% descrip - Description             ['']
+%__________________________________________________________________________
+% Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
 % -------------------------------------------------------------------------
 % Parse arguments
