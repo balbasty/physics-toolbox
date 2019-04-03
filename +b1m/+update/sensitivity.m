@@ -160,6 +160,13 @@ end
 % Boundary condition (usually Neumann = null derivative)
 spm_field('boundary', bnd); 
 
+% -------------------------------------------------------------------------
+% Undersampling proportion (for approximate Hessian)
+if ~isempty(mask)
+    propmask = sum(mask(:))/numel(mask);
+else
+    propmask = 1;
+end
 
 % =========================================================================
 %
@@ -318,9 +325,9 @@ for n=all_n
         end
         
         if diagprec
-            Hz  = Nvox * A1 * real(conj(rz) .* prz);
+            Hz  = Nvox * propmask * A1 * real(conj(rz) .* rz);
         else
-            Hz  = Nvox * prec(n,n) * real(conj(rz(:,n)) .* prz(:,n));
+            Hz  = Nvox * propmask * prec(n,n) * real(conj(rz(:,n)) .* rz(:,n));
         end
         
         switch lower(encoding)
