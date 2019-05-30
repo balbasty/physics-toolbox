@@ -83,7 +83,7 @@ p.addParameter('NbBasis',       [10 10 10],  @(X) isnumeric(X) && numel(X) <= 3)
 p.addParameter('RegMatrix',     [],          @(X) isnumeric(X));
 p.addParameter('SamplingMask',  [],          @utils.isarray);
 p.parse(varargin{:});
-mean        = p.Results.MeanImage;
+meanim      = p.Results.MeanImage;
 coils       = p.Results.CoilImages;
 sens        = p.Results.SensMaps;
 all_n       = p.Results.Index;
@@ -157,6 +157,12 @@ if all(~optim)
 end
 
 % -------------------------------------------------------------------------
+% GPU
+gpu_on = isa(prec, 'gpuArray');
+if gpu_on, loadarray = @utils.loadarray_gpu;
+else,      loadarray = @utils.loadarray_cpu; end
+ 
+% -------------------------------------------------------------------------
 % Boundary condition (usually Neumann = null derivative)
 spm_field('boundary', bnd); 
 
@@ -176,10 +182,6 @@ end
 
 % -------------------------------------------------------------------------
 % Prepare stuff to save time in the loop
-% --- GPU
-gpu_on = isa(prec, 'gpuArray');
-if gpu_on, loadarray = @utils.loadarray_gpu;
-else,      loadarray = @utils.loadarray_cpu; end
 % --- Log-likelihood
 function llm = computellm(n,ds)
     if diagprec
@@ -201,7 +203,7 @@ function llm = computellm(n,ds)
 
         % -----------------------------------------------------------------
         % Load one slice of the mean
-        rz = loadarray(mean(:,:,z,:), @single);
+        rz = loadarray(meanim(:,:,z,:), @single);
         rz = reshape(rz, [], 1);
 
         % -----------------------------------------------------------------
@@ -230,7 +232,7 @@ function llm = computellm(n,ds)
         
         % -----------------------------------------------------------------
         % Compute log-likelihood
-        llm = llm - sum(double(real(dot(rz,(prz-2*xz)*A1,1))));
+        llm = llm - sum(double(real(dot(rz,(prz-2*xz)*A1,1))), 'omitnan');
         
         rz  = [];
         prz = [];
@@ -287,7 +289,7 @@ for n=all_n
 
         % -----------------------------------------------------------------
         % Load one slice of the mean
-        rz = loadarray(mean(:,:,z,:), @single);
+        rz = loadarray(meanim(:,:,z,:), @single);
         rz = reshape(rz, [], 1);
 
         % -----------------------------------------------------------------
@@ -305,7 +307,7 @@ for n=all_n
         
         % -----------------------------------------------------------------
         % Compute gradient
-        llm = llm - sum(double(real(dot(rz,(prz-2*xz)*A1,1))));
+        llm = llm - sum(double(real(dot(rz,(prz-2*xz)*A1,1))), 'omitnan');
         
         tmp = (prz - xz) * A1;
         if diagprec
@@ -329,6 +331,9 @@ for n=all_n
         else
             Hz  = Nvox * propmask * prec(n,n) * real(conj(rz(:,n)) .* rz(:,n));
         end
+        
+        gz(~isfinite(gz)) = 0;
+        Hz(~isfinite(gz)) = 0;
         
         switch lower(encoding)
             case 'image'

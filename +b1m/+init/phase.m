@@ -35,6 +35,7 @@ for z=1:lat(3)
     % Load one slice of the complete coil dataset
     xz = loadarray(coils(:,:,z,:), @single);
     xz = reshape(xz, [], Nc);
+    mask = isfinite(xz);
     xz = angle(xz);
 
     % ---------------------------------------------------------------------
@@ -46,8 +47,12 @@ for z=1:lat(3)
     % ---------------------------------------------------------------------
     % Accumulate sin(diff) and cos(diff)
     sz = bsxfun(@minus, xz, rz);
-    sumsin = sumsin + sum(sin(sz),1);
-    sumcos = sumcos + sum(cos(sz),1);
+    sinsz        = sin(sz);
+    sinsz(~mask) = 0;
+    cossz        = cos(sz);
+    cossz(~mask) = 0;
+    sumsin = sumsin + sum(sinsz,1);
+    sumcos = sumcos + sum(cossz,1);
 
 end
 
@@ -55,7 +60,7 @@ end
 % Compute mean shift (Von Mises maximum likelihood)
 shift = atan2(sumsin,sumcos);
 
-% ---------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Write
 for n=1:size(sens,4)
     sens(:,:,:,n) = sens(:,:,:,n) - 1i*imag(sens(:,:,:,n)) + 1i*shift(n);

@@ -27,12 +27,14 @@ end
 % -------------------------------------------------------------------------
 % Process slice-wise to save memory
 sumlog = zeros(1,Nc);
+Nvox   = zeros(1,Nc);
 for z=1:lat(3) 
     
     % ---------------------------------------------------------------------
     % Load one slice of the complete coil dataset
     xz = loadarray(coils(:,:,z,:), @single);
     xz = reshape(xz, [], Nc);
+    mask = isfinite(xz);
     xz = log(abs(xz)+eps);
 
     % ---------------------------------------------------------------------
@@ -42,17 +44,18 @@ for z=1:lat(3)
     rz = log(abs(rz)+eps);
 
     % ---------------------------------------------------------------------
-    % Accumulate sin(diff) and cos(diff)
+    % Accumulate
     sz = bsxfun(@minus, xz, rz);
+    sz(~mask) = 0;
     sumlog = sumlog + sum(sz,1);
-
+    Nvox   = Nvox   + sum(mask,1);
 end
 
 % -------------------------------------------------------------------------
 % Compute mean shift
-sumlog = sumlog/prod(lat);
+sumlog = sumlog./Nvox;
 
-% ---------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Write
 for n=1:size(sens,4)
     sens(:,:,:,n) = sens(:,:,:,n) - real(sens(:,:,:,n)) + sumlog(n);

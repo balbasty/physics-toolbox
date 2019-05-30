@@ -1,4 +1,4 @@
-function mean = mean_fullysampled(coils, sens, prec, mean, optim)
+function meanim = mean_fullysampled(coils, sens, prec, meanim, optim)
 % Maximum likelihood mean given a set of observed coil images, 
 % log-sensitivity profiles and a noise precision (= inverse covariance) 
 % matrix.
@@ -26,9 +26,18 @@ if gpu_on, loadarray = @utils.loadarray_gpu;
 else,      loadarray = @utils.loadarray_cpu; end
 
 % -------------------------------------------------------------------------
+% Number of observed voxels (handle missing data)
+Nvoxsub = zeros(Nc,1);
+for z=1:Nz
+    xz = loadarray(coils(:,:,z,:), @single);
+    xz = reshape(xz, [], Nc);
+    Nvoxsub = Nvoxsub + reshape(sum(isfinite(xz),1), Nc, 1);
+end
+
+% -------------------------------------------------------------------------
 % Allocate output volume
-if nargin < 4 || isempty(mean)
-    mean = zeros(lat, 'like', coils);
+if nargin < 4 || isempty(meanim)
+    meanim = zeros(lat, 'like', coils);
 end
 if nargin < 5
     optim = [true true];
@@ -49,6 +58,11 @@ for z=1:lat(3)
     xz = reshape(xz, [], NC);
 
     % ---------------------------------------------------------------------
+    % Compute map of missing data
+    cz = utils.gmm.lib('obs2code', xz);
+    code_list = unique(cz)';
+    
+    % ---------------------------------------------------------------------
     % Load one slice of the complete sensitivity dataset + correct
     sz = loadarray(sens(:,:,z,:), @single);
     sz = reshape(sz, [], NC);
@@ -57,13 +71,25 @@ for z=1:lat(3)
     % ---------------------------------------------------------------------
     % Compute mean
     % rho = (s'*A*x) ./ (s'*A*s)
-    Asz = double(sz * prec);
-    rz  = dot(Asz, double(xz), 2);
-    rz  = rz ./ single(dot(Asz, double(sz), 2));
-    clear Asz
-    
+    rz  = zeros(size(xz,1), 'single');
+    for code=code_list
+        mask = cz == code;
+        bin  = utils.gmm.lib('code2bin', code, Nc);
+        if ~any(bin)
+            continue
+        end
+        A = utils.invPD(prec);
+        A = A(bin,bin);
+        A = utils.invPD(A);
+        
+        Asz = double(sz(mask,bin) * A);
+        rz(mask)  = dot(Asz, double(xz(mask,bin)), 2);
+        rz(mask)  = rz(mask) ./ single(dot(Asz, double(sz(mask,bin)), 2));
+        clear Asz
+    end
+
     if ~all(optim)
-         rz0 = loadarray(mean(:,:,z), @single);
+         rz0 = loadarray(meanim(:,:,z), @single);
          rz0 = reshape(rz0, [], 1);
         if optim(1)
             phi  = angle(rz0); clear rz0
@@ -76,9 +102,9 @@ for z=1:lat(3)
         end
         clear mag phi
     end
-    
+
     % ---------------------------------------------------------------------
     % Write slice
-    mean(:,:,z) = reshape(rz, lat(1), lat(2));
+    meanim(:,:,z) = reshape(rz, lat(1), lat(2));
 
 end

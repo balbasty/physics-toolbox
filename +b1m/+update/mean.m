@@ -89,7 +89,7 @@ p.parse(varargin{:});
 coils       = p.Results.CoilImages;
 sens        = p.Results.SensMaps;
 mean        = p.Results.MeanImage;
-A           = p.Results.Precision;
+prec        = p.Results.Precision;
 prm         = p.Results.RegStructure;
 regfactor   = p.Results.RegFactor;
 regpart     = p.Results.RegPartFactor;
@@ -106,8 +106,8 @@ Nc   = size(coils,4);                                     % Number of coils
 lat  = [size(coils,1) size(coils,2) size(coils,3)]; % Fully sampled lattice
 Nvox = prod(lat);                        % Number of (fully sampled) voxels
 % Precision: default = identity
-if numel(A) == 1
-    A = A * eye(Nc);
+if numel(prec) == 1
+    prec = prec * eye(Nc);
 end
 % Reg components: just change reg structure
 regpart = padarray(regpart(:)', [0 max(0,2-numel(regpart))], 'replicate', 'post');
@@ -140,7 +140,7 @@ if regfactor > 0
     regfactor = regfactor / double(mean(abs(coils(:))))^2;
 end
 
-gpu_on = isa(A, 'gpuArray');
+gpu_on = isa(prec, 'gpuArray');
 if gpu_on, loadarray = @utils.loadarray_gpu;
 else,      loadarray = @utils.loadarray_cpu; end
 
@@ -186,6 +186,11 @@ for z=1:lat(3)
     xz = reshape(xz, [], Nc);
 
     % ---------------------------------------------------------------------
+    % Compute map of missing data in observed domain
+    cz = utils.gmm.lib('obs2code', xz);
+    code_list = unique(cz)';
+    
+    % ---------------------------------------------------------------------
     % Load one slice of the (previous) mean
     rz = loadarray(mean(:,:,z,:), @single);
     rz = reshape(rz, [], 1);
@@ -201,31 +206,47 @@ for z=1:lat(3)
     % If incomplete sampling: push+pull coil-specific means
     prz = b1m.adjoint_forward(reshape(rz, [lat(1:2) 1 Nc]), mask);
     prz = reshape(prz, [], Nc);
+    
+    % ---------------------------------------------------------------------
+    % Missing data in observed domain
+    gz = zeros(size(xz,1), sum(optim), 'single');
+    Hz = zeros(size(xz,1), 1, 'single');
+    for code=code_list
+    
+        sub = cz == code;
+        bin  = utils.gmm.lib('code2bin', code, Nc);
+        if ~any(bin)
+            continue
+        end
+        A = utils.invPD(prec);
+        A = A(bin,bin);
+        A = utils.invPD(A);
         
-    llm = llm - sum(double(real(dot(rz,(prz-2*xz)*A,1))));
-    clear rz
-    
-    % ---------------------------------------------------------------------
-    % Compute Hessian
-    Hz       = propmask * Nvox * real(dot(sz, sz*A, 2));
-    H(:,:,z) = reshape(Hz, lat(1:2));
-    clear Hz
-    
-    % ---------------------------------------------------------------------
-    % Compute co-gradient
-    tmp = Nvox * dot(sz, (prz - xz)*A, 2);
-    gz  = zeros([size(tmp,1) sum(optim)], 'like' ,real(tmp(1)));
-    i   = 1;
-    if optim(1) % If optimise sensitivity magnitude
-        gz(:,i) = real(tmp);
-        i = i+1;
-    end
-    if optim(2) % If optimise sensitivity phase
-        gz(:,i) = imag(tmp);
-    end
-    g(:,:,z,:)  = reshape(gz, lat(1), lat(2), 1, []);
+        % -----------------------------------------------------------------
+        % Compute log-likelihood
+        llm = llm - sum(double(real(dot(rz(sub,bin),(prz(sub,bin)-2*xz(sub,bin))*A,1))));
 
-    clear gz tmp prz
+        % -----------------------------------------------------------------
+        % Compute Hessian
+        Hz(sub) = propmask * Nvox * real(dot(sz(sub,bin), sz(sub,bin)*A, 2));
+
+        % -----------------------------------------------------------------
+        % Compute co-gradient
+        tmp = Nvox * dot(sz(sub,bin), (prz(sub,bin) - xz(sub,bin))*A, 2);
+        i   = 1;
+        if optim(1) % If optimise sensitivity magnitude
+            gz(sub,i) = real(tmp);
+            i = i+1;
+        end
+        if optim(2) % If optimise sensitivity phase
+            gz(sub,i) = imag(tmp);
+        end
+
+    end
+        
+    H(:,:,z)   = reshape(Hz, lat(1:2));
+    g(:,:,z,:) = reshape(gz, lat(1), lat(2), 1, []);
+    clear rz gz tmp prz
 end
 llm = 0.5 * Nvox * llm;
 
@@ -325,6 +346,11 @@ for ls=1:6
         xz = reshape(xz, [], Nc);
 
         % -----------------------------------------------------------------
+        % Compute map of missing data in observed domain
+        cz = utils.gmm.lib('obs2code', xz);
+        code_list = unique(cz)';
+    
+        % -----------------------------------------------------------------
         % Load one slice of the (previous) mean
         rz = loadarray(mean(:,:,z,:), @single);
         rz = reshape(rz, [], 1);
@@ -342,9 +368,23 @@ for ls=1:6
         prz = b1m.adjoint_forward(reshape(rz, [lat(1:2) 1 Nc]), mask);
         prz = reshape(prz, [], Nc);
 
-        llm = llm - sum(double(real(dot(rz,(prz-2*xz)*A,1))));
-        rz  = [];
-        prz = [];
+        % -----------------------------------------------------------------
+        % Missing data in observed domain
+        for code=code_list
+
+            sub = cz == code;
+            bin  = utils.gmm.lib('code2bin', code, Nc);
+            if ~any(bin)
+                continue
+            end
+            A = utils.invPD(prec);
+            A = A(bin,bin);
+            A = utils.invPD(A);
+
+            llm = llm - sum(double(real(dot(rz(sub,bin),(prz(sub,bin)-2*xz(sub,bin))*A,1))));
+
+        end
+        clear z prz xz
 
     end
     llm = 0.5 * Nvox * llm;

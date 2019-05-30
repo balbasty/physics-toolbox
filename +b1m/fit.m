@@ -189,6 +189,7 @@ end
 % -------------------------------------------------------------------------
 if isempty(prec) || any(any(isnan(prec)))
     [~,prec] = b1m.init.noise(coils);
+    prec = prec / Nvox;
 end
 
 % -------------------------------------------------------------------------
@@ -335,7 +336,7 @@ for it=1:itermax
     % Coil-wise sensitivity update (Gauss-Newton)
     % ---------------------------------------------------------------------
     if verbose > 0, fprintf('> Update Sensitivity:'); end
-    if isdiag(prec) && verbose < 2
+    if isdiag(prec) && verbose < 3
         % If the precision matrix is diagonal, computation of the
         % log-likelihood and derivatives in implemented in a slightly
         % faster way (each sensitivity field only depends on one coil).
@@ -408,7 +409,7 @@ for it=1:itermax
                 if ok, fprintf(' :D (%d) | ', ls);
                 else,  fprintf(' :(     | ');
                 end
-                if verbose > 1
+                if verbose > 2
                     b1m.plot.fit(n, coils, sens, mean, mask, vs);
                 end
             end

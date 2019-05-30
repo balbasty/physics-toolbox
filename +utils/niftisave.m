@@ -1,7 +1,7 @@
 function niftisave(fname, vol, varargin)
 % Save a matlab array as Nifti file
 %
-% FORMAT niftisave(fname, vol, ...)
+% FORMAT utils.niftisave(fname, vol, ...)
 %
 % REQUIRED
 % --------
@@ -26,7 +26,7 @@ function niftisave(fname, vol, varargin)
 p = inputParser;
 p.FunctionName = 'niftisave';
 p.addRequired('fname',            @ischar);
-p.addRequired('vol',              @isnumeric);
+p.addRequired('vol',              @(X) isnumeric(X) || islogical(X));
 p.addParameter('mat',     eye(4), @ismat);
 p.addParameter('vs',      [],     @isnumeric);
 p.addParameter('dtype',   '',     @istype);
@@ -68,6 +68,9 @@ nii.mat     = mat;
 nii.mat0    = mat;
 nii.descrip = descrip;
 create(nii);
+if islogical(vol)
+    vol = uint8(vol);
+end
 nii.dat(:)  = vol(:);
 
 end
@@ -122,7 +125,7 @@ function dtype = map_type(mtype,isreal)
             case 'int64'
                 dtype = 'int64';
             case 'logical'
-                dtype = 'binary';
+                dtype = 'uint8';
             otherwise
                 warning('Real data type %s not handled. Using float32 instead.', mtype);
                 dtype = 'float32';

@@ -21,6 +21,10 @@ Nz = size(coils,3);
 Nc = size(coils,4);
 Nvox = Nx*Ny*Nz;
 
+gpu_on = isa(prec, 'gpuArray');
+if gpu_on, loadarray = @utils.loadarray_gpu;
+else,      loadarray = @utils.loadarray_cpu; end
+
 % -------------------------------------------------------------------------
 % Compute log-likelihood (conditional)
 llm = 0;
@@ -31,6 +35,11 @@ for z=1:Nz
     xz = loadarray(coils(:,:,z,:), @single);
     xz = reshape(xz, [], Nc);
 
+    % ---------------------------------------------------------------------
+    % Compute map of missing data
+    cz = utils.gmm.lib('obs2code', xz);
+    code_list = unique(cz)';
+    
     % ---------------------------------------------------------------------
     % Load one slice of the (previous) mean
     rz = loadarray(mean(:,:,z,:), @single);
@@ -48,7 +57,21 @@ for z=1:Nz
     prz = b1m.adjoint_forward(reshape(rz, [Nx Ny 1 Nc]), mask);
     prz = reshape(prz, [], Nc);
 
-    llm = llm - sum(double(real(dot(rz,(prz-2*xz)*prec,1))));
+    % ---------------------------------------------------------------------
+    % Missing data
+    for code=code_list
+        sub = cz == code;
+        bin  = code2bin(code, Nc);
+        if ~any(bin)
+            continue
+        end
+        A = utils.invPD(prec);
+        A = A(bin,bin);
+        A = utils.invPD(A);
+        
+        llm = llm - sum(double(real(dot(rz(sub,bin),(prz(sub,bin)-2*xz(sub,bin))*A,1))));
+    end
+    
 
 end
 llm = 0.5 * Nvox * llm;
