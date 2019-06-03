@@ -11,22 +11,23 @@ if nargin < 3
     cond = '';
 end
 
-is_set = de2bi(flags,max(max(value),numel(de2bi(max(flags)))));   % Extract the value of each bit
-is_set = is_set(:,value);           % Extract only flags of interest
-switch lower(cond)
-    case 'any'
-        is_set = any(is_set,2);
-    case 'all'
-        is_set = all(is_set,2);
+% This version is faster and less memory hungry but less easy to read
+is_set = strcmpi(cond, 'all');
+for i=1:numel(value)
+    bitmask = bitshift(uint64(1), uint64(value(i)) - uint64(1));
+    if strcmpi(cond,'all')
+        is_set  = is_set & bsxfun(@bitand, uint64(flags), bitmask) > 0;
+    else
+        is_set  = is_set | bsxfun(@bitand, uint64(flags), bitmask) > 0;
+    end
 end
 
-% % This version is probably faster but less easy to read
-% is_set = strcmpi(cond, 'all');
-% for i=1:numel(value)
-%     bitmask = bitshift(uint64(1), uint64(value(i)) - uint64(1));
-%     if strcmpi(cond,'all')
-%         is_set  = is_set & bsxfun(@bitand, uint64(flags), bitmask) > 0;
-%     else
-%         is_set  = is_set | bsxfun(@bitand, uint64(flags), bitmask) > 0;
-%     end
+% This version is understandable
+% is_set = de2bi(flags,max(max(value),numel(de2bi(max(flags)))));   % Extract the value of each bit
+% is_set = is_set(:,value);           % Extract only flags of interest
+% switch lower(cond)
+%     case 'any'
+%         is_set = any(is_set,2);
+%     case 'all'
+%         is_set = all(is_set,2);
 % end
