@@ -306,7 +306,7 @@ switch lower(layout)
                     & (idx_sub{5} == rp) ...
                     & (idx_sub{6} == st) ...
                     & (idx_sub{7} == sg);
-            idx_out{1}(sub_mask) = 1:numel(sub_mask);
+            idx_out{1}(sub_mask) = 1:sum(sub_mask);
         end; end; end; end; end; end; end
         k1_size = max(idx_out{1});
         k2_size = 1;
