@@ -26,7 +26,7 @@ function dat = read(fname, varargin)
 %             * 'imaging':    {} [unused]
 %             * 'calib':      {20 21}
 %             * 'noise':      {19}
-%             * 'navigation': {23}
+%             * 'navigation': {23 24}
 %             * 'perso':      {} [unused]
 % flags_out - Selected lines cannot have one of these flags 
 %             * 'kspace':     {19 23 24 26 27 28 29}
@@ -112,7 +112,7 @@ switch lower(subpart)
     case 'noise'
         flags_in = [flags_in {19}];
     case 'navigation'
-        flags_in = [flags_in {23}];
+        flags_in = [flags_in {23 24}];
     otherwise
         warning('Unknown subpart %s', subpart);
 end
