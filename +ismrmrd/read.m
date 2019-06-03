@@ -229,7 +229,7 @@ if verbose, fprintf('Select samples and channels\n'); end
 if isempty(rd_out), rd_out = 1:rd_size; else, rd_size = numel(rd_out); end
 if isempty(ch_out), ch_out = 1:ch_size; else, ch_size = numel(ch_out); end
 if numel(ch_out) ~= size(dataLines,1) || numel(rd_out) ~= size(dataLines,2)
-    dataLines = dataLines(ch_out,rd_out,ch_out,:,:);
+    dataLines = dataLines(ch_out,rd_out,:,:);
 end
 dataLines = complex(dataLines(:,:,:,1),dataLines(:,:,:,2));
 
