@@ -26,16 +26,24 @@ if ischar(fname)
     [~,~,ext] = fileparts(fname);
     switch ext
         case '.h5'
+            if ~exist(fname,'file')
+                error('File %s does not exist',fname);
+            end
             xmlstring = h5read(fname, '/dataset/xml');
             xmlstring = xmlstring{1};
             DOMnode   = xmlreadstring(xmlstring);
         case '.xml'
+            if ~exist(fname,'file')
+                error('File %s does not exist',fname);
+            end
             DOMnode   = xmlread(fname);
         otherwise 
             DOMnode   = xmlreadstring(fname);
     end
 elseif isa(fname, 'org.apache.xerces.dom.DeferredDocumentImpl')
     DOMnode = fname;
+else
+    error('The input must be a h5 file, xml file, xml string or DOM object');
 end
 
 % -------------------------------------------------------------------------
