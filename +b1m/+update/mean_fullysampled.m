@@ -20,7 +20,8 @@ function meanim = mean_fullysampled(coils, sens, prec, meanim, optim)
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
 lat = [size(coils,1), size(coils,2), size(coils,3)];
-NC  = size(coils,4);
+Nc  = size(coils,4);
+Nz  = size(coils, 3);
 gpu_on = isa(prec, 'gpuArray');
 if gpu_on, loadarray = @utils.loadarray_gpu;
 else,      loadarray = @utils.loadarray_cpu; end
@@ -55,7 +56,7 @@ for z=1:lat(3)
     % ---------------------------------------------------------------------
     % Load one slice of the complete coil dataset
     xz = loadarray(coils(:,:,z,:), @single);
-    xz = reshape(xz, [], NC);
+    xz = reshape(xz, [], Nc);
 
     % ---------------------------------------------------------------------
     % Compute map of missing data
@@ -65,13 +66,12 @@ for z=1:lat(3)
     % ---------------------------------------------------------------------
     % Load one slice of the complete sensitivity dataset + correct
     sz = loadarray(sens(:,:,z,:), @single);
-    sz = reshape(sz, [], NC);
-    sz = exp(sz);
+    sz = reshape(sz, [], Nc);
 
     % ---------------------------------------------------------------------
     % Compute mean
     % rho = (s'*A*x) ./ (s'*A*s)
-    rz  = zeros(size(xz,1), 'single');
+    rz  = zeros(size(xz,1), 1, 'single');
     for code=code_list
         mask = cz == code;
         bin  = utils.gmm.lib('code2bin', code, Nc);

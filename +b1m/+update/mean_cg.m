@@ -16,13 +16,15 @@ function [meanim,llm,llp,ok,ls] = mean(varargin)
 %
 % KEYWORD ARGUMENTS
 % ----------------- 
-% Precision      - Array [Nc Nc]    - Noise precision matrix        [eye(Nc)]
-% RegFactor      - Scalar           - Regularisation magnitude      [0=ML]
-% VoxelSize      - Array [1 3]      - Voxel size                    [1]
-% LLPrior        - Scalar           - Previous prior log-likelihood [NaN]
-% SensLog        - Boolean          - Log-sensitivities             [false]
-% SamplingMask   - Array [Nx Ny]    - Mask of the sampling scheme   [ones]
-% BackgroundMask - Array [Nx Ny]    - Mask of the background        [zeros]
+% Precision     - Array [Nc Nc]    - Noise precision matrix        [eye(Nc)]
+% RegStructure  - [Abs Mem Ben]    - Regularisation structure      [0 1 0]
+% RegFactor     - Scalar           - Regularisation magnitude      [0=ML]
+% RegPartFactor - [Mag Phase]      - Reg modulator magnitude/phase [1 1]
+% RegBoundary   - Scalar | String  - Boundary condition            ['Neumann']
+% VoxelSize     - Vector [3]       - Voxel size                    [1 1 1]
+% LLPrior       - Scalar           - Previous prior log-likelihood [NaN]
+% PartOptim     - [Mag Phase]      - Optimise magnitude/phase      [true true]
+% SamplingMask  - Array [Nx Ny]    - Mask of the sampling scheme   [ones]
 %
 % OUTPUT
 % ------
@@ -39,7 +41,6 @@ function [meanim,llm,llp,ok,ls] = mean(varargin)
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
-
 % =========================================================================
 %
 %                       PARSE AND PROCESS ARGUMENTS
@@ -47,66 +48,98 @@ function [meanim,llm,llp,ok,ls] = mean(varargin)
 % =========================================================================
 
 % -------------------------------------------------------------------------
+% Helper functions to check input arguments
+% -------------------------------------------------------------------------
+function ok = isarray(X)
+    ok = isnumeric(X) || islogical(X) || isa(X, 'file_array');
+end
+function ok = isboundary(X)
+    ok = (isnumeric(X) && isscalar(X) && 0 <= X && X <= 1) || ...
+         (ischar(X)    && any(strcmpi(X, {'c','circulant','n','neumann'})));
+end
+function ok = isrealarray(X)
+    function okk = isrealtype(T)
+        okk = numel(T) > 7 || ~strcmpi(T(1:7),'complex');
+    end
+    if isa(X, 'file_array')
+        ok = all(cellfun(@isrealtype, {X.dtype}));
+    else
+        ok = isreal(X);
+    end
+end
+
+% -------------------------------------------------------------------------
 % Parse input
 % -------------------------------------------------------------------------
 p = inputParser;
 p.FunctionName = 'b1m.update.mean';
-p.addRequired('CoilImages',                   @utils.isarray);
-p.addRequired('SensMaps',                     @utils.isarray);
-p.addOptional('MeanImage',       [],          @utils.isarray);
-p.addParameter('Precision',      1,           @isnumeric);
-p.addParameter('RegFactor',      0,           @(X) isnumeric(X) && isscalar(X));
-p.addParameter('VoxelSize',      [1 1 1],     @(X) isnumeric(X) && isrow(X) && numel(X) <= 3);
-p.addParameter('LLPrior',        NaN,         @(X) isnumeric(X) && isscalar(X));
-p.addParameter('SensLog',        false,       @utils.isboolean);
-p.addParameter('SamplingMask',   [],          @utils.isarray);
-p.addParameter('BackgroundMask', [],          @utils.isarray);
+p.addRequired('CoilImages',                  @isarray);
+p.addRequired('SensMaps',                    @isarray);
+p.addOptional('MeanImage',      [],          @isarray);
+p.addParameter('Precision',     1,           @isnumeric);
+p.addParameter('RegStructure',  [0 1 0],     @(X) isnumeric(X) && numel(X) == 3);
+p.addParameter('RegFactor',     0,           @(X) isnumeric(X) && isscalar(X));
+p.addParameter('RegPartFactor', 1,           @(X) isnumeric(X) && numel(X) <= 2);
+p.addParameter('RegBoundary',   1,           @isboundary);
+p.addParameter('VoxelSize',     [1 1 1],     @(X) isnumeric(X) && numel(X) <= 3);
+p.addParameter('LLPrior',       NaN,         @(X) isnumeric(X) && isscalar(X));
+p.addParameter('PartOptim',     [true true], @(X) (isnumeric(X) || islogical(X)) && numel(X) == 2);
+p.addParameter('SamplingMask',  1,           @isarray);
 p.parse(varargin{:});
 coils       = p.Results.CoilImages;
 sens        = p.Results.SensMaps;
 meanim      = p.Results.MeanImage;
 prec        = p.Results.Precision;
-reg         = p.Results.RegFactor;
+prm         = p.Results.RegStructure;
+regfactor   = p.Results.RegFactor;
+regpart     = p.Results.RegPartFactor;
+bnd         = p.Results.RegBoundary;
 vs          = p.Results.VoxelSize;
 llp         = p.Results.LLPrior;
+optim       = p.Results.PartOptim;
 mask        = p.Results.SamplingMask;
-senslog     = p.Results.SensLog;
-bgmask      = p.Results.BackgroundMask;
 
 % -------------------------------------------------------------------------
-% Dimensions
+% Post-process input
 % -------------------------------------------------------------------------
 Nc   = size(coils,4);                                     % Number of coils
 lat  = [size(coils,1) size(coils,2) size(coils,3)]; % Fully sampled lattice
 Nvox = prod(lat);                        % Number of (fully sampled) voxels
-
-% -------------------------------------------------------------------------
 % Precision: default = identity
-
-% -------------------------------------------------------------------------
 if numel(prec) == 1
     prec = prec * eye(Nc);
 end
+% Reg components: just change reg structure
+regpart = utils.pad(regpart(:)', [0 2-numel(regpart)], 'replicate', 'post');
+% Boundary: convert to scalar representation
+switch bnd
+    case {0, 'c', 'circulant'}
+        bnd = 0;
+    case {1, 'n', 'neumann'}
+        bnd = 1;
+    otherwise
+        warning('Unknown boundary condition %s. Using Neumann instead', num2str(bnd))
+        bnd = 1;
+end
+if regfactor > 0, spm_field('boundary', bnd); end
+% Voxel size: ensure row vector + complete
+vs = utils.pad(vs(:)', [0 3-numel(vs)], 'replicate', 'post');
+% Optimisation: if observed images are real, optim = [true false]
+% Reg components: just change reg structure
+optim = utils.pad(optim(:)', [0 2-numel(optim)], 'replicate', 'post');
+if isrealarray(coils)
+    optim(2) = false;
+end
+optim = logical(optim);
+if all(~optim)
+    warning('Nothing to update')
+    return
+end
 
-% -------------------------------------------------------------------------
-% Pad Voxel size
-% -------------------------------------------------------------------------
-vs = utils.pad(double(vs), [0 3-numel(vs)], 'replicate', 'post');
-
-% -------------------------------------------------------------------------
-% GPU
-% -------------------------------------------------------------------------
 gpu_on = isa(prec, 'gpuArray');
 if gpu_on, loadarray = @utils.loadarray_gpu;
 else,      loadarray = @utils.loadarray_cpu; end
 
-% -------------------------------------------------------------------------
-% Regularisation structure
-% -------------------------------------------------------------------------
-if reg > 0
-    prm = [0 1 0];              % Membrane energy
-    spm_field('boundary', 1);   % Neumann boundary conditions
-end
 
 % =========================================================================
 %
@@ -118,8 +151,8 @@ end
 % Compute log-likelihood (mean prior)
 % -------------------------------------------------------------------------
 if isnan(llp) 
-    if reg
-        llp = b1m.ll.mean(meanim, 'RegFactor', reg, 'VoxelSize', vs);
+    if regfactor
+        llp = b1m.ll.mean(meanim, regfactor*prm, vs, regpart);
     else
         llp = 0;
     end
@@ -128,18 +161,20 @@ end
 % -------------------------------------------------------------------------
 % Allocate gradient and Hessian
 % -------------------------------------------------------------------------
-g   = zeros([lat 2],'like',loadarray(single(1)));       % Gradient
+g   = zeros([lat sum(optim)],'like',loadarray(single(1)));       % Gradient
 H   = zeros([lat 1],'like',loadarray(single(1)));                 % Hessian
 llm = 0;                                       % Conditional log-likelihood
 
-% -------------------------------------------------------------------------
-% Undersampling proportion
-% -------------------------------------------------------------------------
-if ~isempty(mask)
-    hfactor = sum(mask(:))/numel(mask);
-else
-    hfactor = 1;
-end
+% I used to replace F'PF with its diagonal, but I've recently replaced it 
+% by an identity, in hope that it is more positive-definite. It doesn't
+% seem to hurt convergence too much.
+propmask = 1;
+
+% if ~isempty(mask)
+%     propmask = sum(mask(:))/numel(mask);
+% else
+%     propmask = 1;
+% end
 
 % -------------------------------------------------------------------------
 % Compute conditional part (slice-wise to save memory)
@@ -165,17 +200,16 @@ for z=1:lat(3)
     % Load one slice of the complete sensitivity dataset + correct
     sz = loadarray(sens(:,:,z,:), @single);
     sz = reshape(sz, [], Nc);
-    if senslog, sz = exp(sz); end
-    mz = bsxfun(@times, rz, sz);
-    
+    rz = bsxfun(@times, rz, sz);
+
     % ---------------------------------------------------------------------
     % If incomplete sampling: push+pull coil-specific means
-    pmz = b1m.adjoint_forward(reshape(mz, [lat(1:2) 1 Nc]), mask);
-    pmz = reshape(pmz, [], Nc);
+    prz = b1m.adjoint_forward(reshape(rz, [lat(1:2) 1 Nc]), mask);
+    prz = reshape(prz, [], Nc);
     
     % ---------------------------------------------------------------------
     % Missing data in observed domain
-    gz = zeros(size(xz,1), 1, 'single');
+    gz = zeros(size(xz,1), sum(optim), 'single');
     Hz = zeros(size(xz,1), 1, 'single');
     for code=code_list
     
@@ -189,65 +223,55 @@ for z=1:lat(3)
         A = utils.invPD(A);
         
         % -----------------------------------------------------------------
-        % Extract sub + precompute
-        mzs  = mz(sub,bin)*A;
-        xzs  = xz(sub,bin);
-        pzs  = pmz(sub,bin) - xzs;
-        szs  = sz(sub,bin);
-        szsA = szs*A;
-        
-        % -----------------------------------------------------------------
         % Compute log-likelihood
-        % llm = llm + sum(double(real(dot(mz(sub,bin),(pmz(sub,bin)-2*xz(sub,bin))*A,2))));
-        llm = llm + real(reshape(mzs, [], 1)' * reshape(pzs, [], 1) ...
-                       - reshape(xzs, [], 1)' * reshape(mzs, [], 1));
-        
+        llm = llm - sum(double(real(dot(rz(sub,bin),(prz(sub,bin)-2*xz(sub,bin))*A,1))));
+
         % -----------------------------------------------------------------
         % Compute Hessian
-        Hz(sub) = hfactor * Nvox * real(dot(szsA, szs, 2));
+        Hz(sub) = propmask * Nvox * real(dot(sz(sub,bin), sz(sub,bin)*A, 2));
 
         % -----------------------------------------------------------------
         % Compute co-gradient
-        gz(sub) = Nvox * dot(szsA, pzs, 2);
+        tmp = Nvox * dot(sz(sub,bin), (prz(sub,bin) - xz(sub,bin))*A, 2);
+        i   = 1;
+        if optim(1) % If optimise sensitivity magnitude
+            gz(sub,i) = real(tmp);
+            i = i+1;
+        end
+        if optim(2) % If optimise sensitivity phase
+            gz(sub,i) = imag(tmp);
+        end
 
     end
-    
-    % ---------------------------------------------------------------------
-    % Background mask
-    if ~isempty(bgmask)
-        bgz = loadarray(bgmask(:,:,z), @logical);
-        bgz = reshape(bgz, [], 1);
-        gz(bgz) = 0;
-        Hz(bgz) = 0;
-    end
-    gz(~isfinite(gz)) = 0;
-    Hz(~isfinite(Hz)) = 0;
-    
-    % ---------------------------------------------------------------------
-    % Store slice
-    gz         = cat(2, real(gz), imag(gz));
-    g(:,:,z,:) = reshape(gz, lat(1), lat(2), 1, []);
+        
     H(:,:,z)   = reshape(Hz, lat(1:2));
+    g(:,:,z,:) = reshape(gz, lat(1), lat(2), 1, []);
+    clear rz gz tmp prz
 end
-clear rz mz pmz sz gz Hz
-llm = - 0.5 * Nvox * llm;
+llm = 0.5 * Nvox * llm;
 
 
-if reg > 0
+if regfactor > 0
     g = gather(g);
     H = gather(H);
     
     % ---------------------------------------------------------------------
     % Load previous value
     % ---------------------------------------------------------------------
-    mean0          = zeros([lat 2], 'single');
-    mean0(:,:,:,1) = real(single(meanim));
-    mean0(:,:,:,2) = imag(single(meanim));
+    if all(optim)
+        mean0          = zeros([lat 2], 'single');
+        mean0(:,:,:,1) = real(single(meanim));
+        mean0(:,:,:,2) = imag(single(meanim));
+    elseif optim(1)
+        mean0 = real(single(meanim));
+    elseif optim(2)
+        mean0 = imag(single(meanim));
+    end
     
     % ---------------------------------------------------------------------
     % Compute prior part
     % ---------------------------------------------------------------------
-    g = g + spm_field('vel2mom', mean0, [vs reg*prm]);
+    g = g + spm_field('vel2mom', mean0, [vs regfactor*prm], regpart(optim));
 end
 
 % =========================================================================
@@ -259,10 +283,16 @@ end
 % -------------------------------------------------------------------------
 % Gauss-Newton
 % -------------------------------------------------------------------------
-if reg > 0
+if regfactor > 0
     dmean = zeros(size(mean0), 'single');
-    dmean(:,:,:,1) = spm_field(H, g(:,:,:,1), [vs reg*prm 2 2]);
-    dmean(:,:,:,2) = spm_field(H, g(:,:,:,2), [vs reg*prm 2 2]);
+    i = 1;
+    if optim(1)
+        dmean(:,:,:,i) = spm_field(H, g(:,:,:,i), [vs regfactor*prm 2 2], regpart(1));
+        i = i + 1;
+    end
+    if optim(2)
+        dmean(:,:,:,i) = spm_field(H, g(:,:,:,i), [vs regfactor*prm 2 2], regpart(2));
+    end
 else
     dmean = bsxfun(@rdivide, g, H);
 end
@@ -271,8 +301,8 @@ clear g H
 % -------------------------------------------------------------------------
 % Parts for log-likelihood (prior)
 % -------------------------------------------------------------------------
-if reg
-    Ldrho = spm_field('vel2mom', dmean, [vs reg*prm]);
+if regfactor
+    Ldrho = spm_field('vel2mom', dmean, [vs regfactor*prm], regpart(optim));
     llp_part1 = double(reshape(mean0, 1, [])) * double(reshape(Ldrho, [], 1));
     llp_part2 = double(reshape(dmean, 1, [])) * double(reshape(Ldrho, [], 1));
     clear Lds
@@ -282,15 +312,14 @@ else
 end
 clear rho0
 
-dmean = complex(dmean(:,:,:,1),dmean(:,:,:,2));
-
-    
-% -------------------------------------------------------------------------
-% Background mask
-% -------------------------------------------------------------------------
-if ~isempty(bgmask)
-    dmean(bgmask) = 0;
+if all(optim)
+    dmean = complex(dmean(:,:,:,1),dmean(:,:,:,2));
+elseif optim(2)
+    dmean = complex(0,dmean);
 end
+% Uncomment the line below to restrict the mean to lie inside the sampling
+% pattern:
+% dmean = b1m.adjoint_forward(dmean,mask);
 
 % -------------------------------------------------------------------------
 % Line search
@@ -331,13 +360,12 @@ for ls=1:6
         % Load one slice of the complete sensitivity dataset + correct
         sz = loadarray(sens(:,:,z,:), @single);
         sz = reshape(sz, [], Nc);
-        if senslog, sz = exp(sz); end
-        mz = bsxfun(@times, rz, sz);
-        
+        rz = bsxfun(@times, rz, sz);
+
         % -----------------------------------------------------------------
         % If incomplete sampling: push+pull coil-specific means
-        pmz = b1m.adjoint_forward(reshape(mz, [lat(1:2) 1 Nc]), mask);
-        pmz = reshape(pmz, [], Nc);
+        prz = b1m.adjoint_forward(reshape(rz, [lat(1:2) 1 Nc]), mask);
+        prz = reshape(prz, [], Nc);
 
         % -----------------------------------------------------------------
         % Missing data in observed domain
@@ -352,24 +380,13 @@ for ls=1:6
             A = A(bin,bin);
             A = utils.invPD(A);
 
-            % -------------------------------------------------------------
-            % Extract sub + precompute
-            mzs  = mz(sub,bin)*A;
-            xzs  = xz(sub,bin);
-            pzs  = pmz(sub,bin) - xzs;
-        
-            % -------------------------------------------------------------
-            % Compute log-likelihood
-            % llm = llm + sum(double(real(dot(mz(sub,bin),(pmz(sub,bin)-2*xz(sub,bin))*A,2))));
-            llm = llm + real(reshape(mzs, [], 1)' * reshape(pzs, [], 1) ...
-                           - reshape(xzs, [], 1)' * reshape(mzs, [], 1));
-            
+            llm = llm - sum(double(real(dot(rz(sub,bin),(prz(sub,bin)-2*xz(sub,bin))*A,1))));
 
         end
+        clear z prz xz
 
     end
-    clear xz rz sz mz pmz
-    llm = - 0.5 * Nvox * llm;
+    llm = 0.5 * Nvox * llm;
 
 
     % ---------------------------------------------------------------------
@@ -378,18 +395,7 @@ for ls=1:6
         ok = true;
         break
     else
-        if armijo == hfactor
-            % alpha = propmask should have improved the o.f.
-            % if not, break out
-            break
-        end
-        if ls < 5
-            % no need to try alpha < hfactor
-            armijo = max(armijo/2, hfactor);
-        else
-            % if last ls iteration: use alpha = hfactor
-            armijo = hfactor;
-        end
+        armijo = armijo/2;
     end
     
 end

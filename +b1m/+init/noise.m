@@ -1,16 +1,15 @@
-function [C,A] = noise(coils, gpu)
+function A = noise(coils, gpu)
 % Estimate the noise variance of each coil by fitting a Rice or Gaussian
 % mixture model to their magnitude image.
 %
-% FORMAT [cov,prec] = b1m.init.noise(coils, (gpu))
+% FORMAT prec = b1m.init.noise(coils, (gpu))
 %
 % coils - (File)Array [Nx Ny Nz Nc] - Complex coil images
 % gpu                               - If 'gpu', compute on GPU
 %
-% cov   -       Array [Nc Nc]       - Noise covariance matrix
 % prec  -       Array [Nc Nc]       - Noise precision matrix
 %
-% >> C = sum((s*r-x)*(s*r-x)')/(2J)     [where ' = conjugate transpose]
+% >> prec = inv(sum((s*r-x)*(s*r-x)')/(2J)) [where ' = conjugate transpose]
 %
 % Nc = number of coils
 %__________________________________________________________________________
@@ -60,17 +59,19 @@ for n=1:Nc
         % If failed, fit Gaussian mixture
         [~,MU,A,PI] = utils.gmm.fit(double(xn), 2, double(wn),...
             'GaussPrior', {[],10,[],10},'BinWidth',bwn);
-        if MU(1) <= MU(2)
-            C(n,n) = 1./A(1);
-        else
-            C(n,n) = 1./A(2);
-        end
+        C(n,n) = 1./max(A);
+%         if MU(1) <= MU(2)
+%             C(n,n) = 1./A(1);
+%         else
+%             C(n,n) = 1./A(2);
+%         end
     else
-        if NU(1) <= NU(2)
-            C(n,n) = SIG(1)^2;
-        else
-            C(n,n) = SIG(2)^2;
-        end
+        C(n,n) = min(SIG).^2;
+%         if NU(1) <= NU(2)
+%             C(n,n) = SIG(1)^2;
+%         else
+%             C(n,n) = SIG(2)^2;
+%         end
     end
     
 end

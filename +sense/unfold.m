@@ -19,7 +19,6 @@ function recon = unfold(varargin)
 % CoilCompact  - Is k-space stored compactely?              [true]
 % CoilSpace    - Frequency (=0) or image (=1) space of      [0]
 %                each dimension
-% SensLog      - Sensitivities in log-space?                [true]
 % SensPInv     - Are sensitivities already pseudo-inverted? [false]
 % ReconMatrix  - Reconstruction matrix                      [Nan=auto]
 % Acceleration - Acceleration factor [k1 k2]                [Nan=auto]
@@ -44,7 +43,6 @@ function recon = unfold(varargin)
 % Defaults
 coil_compact = true;
 coil_space   = 0;
-sens_log     = true;
 sens_pinv    = false;
 recon_lat    = NaN;
 af           = NaN;
@@ -61,7 +59,6 @@ p.addRequired('CoilKSpace',                  @utils.isarray);
 p.addRequired('SensMaps',                    @utils.isarray);
 p.addParameter('CoilCompact',  coil_compact, @utils.isboolean);
 p.addParameter('CoilSpace',    coil_space,   @isnumeric);
-p.addParameter('SensLog',      sens_log,     @utils.isboolean);
 p.addParameter('SensPInv',     sens_pinv,    @utils.isboolean);
 p.addParameter('ReconMatrix',  recon_lat,    @isnumeric);
 p.addParameter('Acceleration', af,           @isnumeric);
@@ -74,7 +71,6 @@ rdata        = p.Results.CoilKSpace;
 sens         = p.Results.SensMaps;
 coil_compact = p.Results.CoilCompact;
 coil_space   = p.Results.CoilSpace;
-sens_log     = p.Results.SensLog;
 sens_pinv    = p.Results.SensPInv;
 recon_lat    = p.Results.ReconMatrix;
 af           = p.Results.Acceleration;
@@ -96,13 +92,13 @@ Nc = size(rdata, 1); % Number of coils
 
 % Pad coil space
 if isempty(coil_space), coil_space = 0; end
-coil_space = padarray(coil_space(:)', [0 max(0, 3-numel(coil_space))], ...
+coil_space = utils.pad(coil_space(:)', [0 3-numel(coil_space)], ...
                       'replicate', 'post');
 
 % Precision
 if isempty(precision), precision = 1; end
 if size(precision,1) == 1 || size(precision,2) == 1
-    precision = padarray(precision(:)', [0 max(Nc,Nc-numel(precision))], ...
+    precision = utils.pad(precision(:)', [0 Nc-numel(precision)], ...
                          'replicate', 'post');
     precision = diag(precision);
 end
@@ -116,16 +112,8 @@ if ~isfinite(parallel)
     parallel = parallel.NumWorkers;
 end
 
-% Sanity check on SensLog/SensPInv
-if sens_log && sens_pinv
-    warning(['Options Senslog and SensPInv are both set to true, '    ...
-             'which is contradictory. I will assume SensPInv = true ' ...
-             'and SensLog = false']);
-    sens_log = false;
-end
-
 % Reconstruction matrix
-recon_lat = padarray(recon_lat(:)', [0 max(0, 3-numel(recon_lat))], ...
+recon_lat = utils.pad(recon_lat(:)', [0 3-numel(recon_lat)], ...
                      'replicate', 'post');
 if ~isfinite(recon_lat(1)) % k1
     if ~coil_compact
@@ -202,6 +190,7 @@ end
 % Reconstruction
 recon = zeros(recon_lat(1)*recon_lat(2),recon_lat(3), 'like', single(1i));
 parfor(z=1:recon_lat(3), parallel)
+% for z=1:recon_lat(3)
     % K-space
     if coil_compact
         xz = zeros([Nc recon_lat(1:2)],'like', double(1i));      % Allocate
@@ -213,8 +202,7 @@ parfor(z=1:recon_lat(3), parallel)
     if ~coil_space(2), xz = utils.ifft(xz, 3); end
     % Sensitivity: 
     sz = double(sens(:,:,:,z));                            % Read one slice
-    sz = b1m.upsample(sz, [NaN recon_lat(1:2)]);       % Frequency -> Image
-    if sens_log, sz = exp(sz); end                           % Exponentiate
+    sz = b1m.upsample(sz, [NaN recon_lat(1:2)]);
     % Whiten
     xz = reshape(xz, Nc, []);
     sz = reshape(sz, Nc, []);

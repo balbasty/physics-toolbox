@@ -81,7 +81,7 @@ if ~isempty(Template)
     logPI = log(bsxfun(@times,logPI,1./sum(logPI,2)));    
 elseif numel(PI) <= K
     PI = PI(:)';
-    PI = padarray(PI, [0 K - numel(PI)], 'replicate', 'post');
+    PI = utils.pad(PI, [0 K - numel(PI)], 'replicate', 'post');
     
     if abs(sum(PI)-1) > eps('single')
         % Dirichlet prior
@@ -142,7 +142,7 @@ missmsk = find(missmsk); % saves a bit of memory
 % binning. Here, we assume some kind of uniform distribution inside the bin
 % and consequently add the corresponding variance to the 2nd order moment.
 if numel(E) < P
-    E = padarray(E, [0 P - numel(E)], 'replicate', 'post');
+    E = utils.pad(E, [0 P - numel(E)], 'replicate', 'post');
 end
 E = (E.^2)/12;
 

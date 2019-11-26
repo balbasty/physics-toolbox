@@ -40,13 +40,13 @@ recon_lat = p.Results.ReconMatrix;
 do_fft    = p.Results.FFT;
 
 % Pad arguments
-acq_fov   = padarray(acq_fov(:)', [0 max(0, 3-numel(acq_fov))], ...
+acq_fov   = utils.pad(acq_fov(:)', [0 max(0, 3-numel(acq_fov))], ...
                      'replicate', 'post');
-recon_lat = padarray(recon_lat(:)', [0 max(0, 3-numel(recon_lat))], ...
+recon_lat = utils.pad(recon_lat(:)', [0 max(0, 3-numel(recon_lat))], ...
                      'replicate', 'post');
-recon_fov = padarray(recon_fov(:)', [0 max(0, 3-numel(recon_fov))], ...
+recon_fov = utils.pad(recon_fov(:)', [0 max(0, 3-numel(recon_fov))], ...
                      'replicate', 'post');
-do_fft    = padarray(do_fft(:)', [0 max(0, 3-numel(do_fft))], ...
+do_fft    = utils.pad(do_fft(:)', [0 max(0, 3-numel(do_fft))], ...
                      'replicate', 'post');
 
 % Get acquisition lattice
@@ -104,6 +104,7 @@ fov_factor = acq_fov./recon_fov;
 %         end
 %     end
 % end
+
 % Update acquisition lattice
 Nr = size(coils,2);
 N1 = size(coils,3);
@@ -158,9 +159,9 @@ for i=1:3
         diff     = ceil(recon_lat(i) - acq_lat(i));
         pad      = zeros(1,5);
         pad(i+1) = floor(diff/2);
-        coils    = padarray(coils, pad, 0, 'both');
+        coils    = utils.pad(coils, pad, 0, 'both');
         if nargout >= 3 && i ~= 1
-            mask    = padarray(mask, pad([3 4]), 0, 'both');
+            mask    = utils.pad(mask, pad([3 4]), 0, 'both');
         end
         if mod(diff,2)
             % odd crop
@@ -172,9 +173,9 @@ for i=1:3
                 % even lattice
                 side = 'post';
             end
-            coils = padarray(coils, pad, 0, side);
+            coils = utils.pad(coils, pad, 0, side);
             if nargout >= 3 && i ~= 1
-                mask = padarray(mask, pad([3 4]), 0, side);
+                mask = utils.pad(mask, pad([3 4]), 0, side);
             end
         end
     end

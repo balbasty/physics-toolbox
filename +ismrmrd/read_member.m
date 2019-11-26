@@ -56,7 +56,7 @@ if isempty(idx)
 else
     ndim = H5S.get_simple_extent_ndims(space);
     subspace = space;
-    idx      = padarray(idx(:), [0 ndim-1], 0, 'post');
+    idx      = utils.pad(idx(:), [0 ndim-1], 0, 'post');
     nblines  = size(idx,1);
     memspace = H5S.create_simple(2, [nblines 1], []);
     H5S.select_elements(subspace,'H5S_SELECT_SET',idx');

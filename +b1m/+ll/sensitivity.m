@@ -1,62 +1,73 @@
-function ll = sensitivity(sens, prm, partfactor, coilfactor, bnd, optim, vs)
+function ll = sensitivity(varargin)
 % Compute prior log-likelihood of the sensitivities
 %
-% FORMAT ll = b1m.ll.sensitivity(SensMaps, RegStructure, RegPartFactor, 
-%                                RegCoilFactor, RegBoundary, SensOptim, 
-%                                VoxelSize)
+% FORMAT lls = b1m.ll.sensitivity(sens, ...)
 %
-% SensMaps      - Complex log-sensitivity profiles          (File)Array [Nx Ny Nz Nc]
-% RegStructure  - Regularisation Structure (abs memb bend)  [0 0 1]
-% RegPartFactor - Regularisation factor per Re/Im component [1E6]
-% RegCoilFactor - Regularisation factor per coil            [1/Nc]
-% RegBoundary   - Boundary conditions for sensitivities     [1=neumann]
-% SensOptim     - Optimize real and/or imaginary parts      [true true]
-% VoxelSize     - Voxel size                                [1]
+% REQUIRED
+% --------
+% sens - (File)Array [Nx Ny Nz Nc] - Complex log-sensitivity profiles          
+%
+% KEYWORD
+% -------
+% RegFactor - Array [Nc 2] - Regularisation factor      [1]
+% VoxelSize - Array [1 3]  - Voxel size                 [1]
+% Parallel  - Scalar       - Number of parallel workers [Inf]
+%
+% OUTPUT
+% ------
+% lls - Array [Nc 2] - Non-constant term of the log-likelihood, 
+%                      per coil and part
+%
+% NOTE: RegFactor/VoxelSize are implicitely expanded along singleton dim.
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
-if nargin < 7
-    vs = [1 1 1];
-    if nargin < 6
-        optim = [true true];
-        if nargin < 5
-            bnd = 1;
-            if nargin < 4
-                coilfactor = 1/size(sens,4);
-                if nargin < 3
-                    partfactor = [1E6 1E6];
-                    if nargin < 2
-                        prm = [0 0 1];
-                    end
-                end
-            end
-        end
-    end
-end
+Nc = size(varargin{1}, 4);
 
-spm_field('boundary', bnd); 
-optim = logical(optim);
+isOnWorker = ~isempty(getCurrentTask());
+if isOnWorker, Nw = 0;
+else,          Nw = Inf; end
+
+% -------------------------------------------------------------------------
+% Parse input
+p = inputParser;
+p.FunctionName = 'b1m.ll.sensitivity';
+p.addRequired('SensMaps',                    @utils.isarray);
+p.addParameter('RegFactor',     1,           @(X) isnumeric(X) && size(X,1) <= Nc && size(X,2) <= 2);
+p.addParameter('VoxelSize',     1,           @(X) isnumeric(X) && isrow(X) && numel(X) <= 3);
+p.addParameter('Parallel',      Nw,          @utils.isboolean);
+p.parse(varargin{:});
+sens    = p.Results.SensMaps;
+reg     = p.Results.RegFactor;
+vs      = p.Results.VoxelSize;
+Nw      = p.Results.Parallel;
+
+% -------------------------------------------------------------------------
+% Pad parameters
+reg = utils.pad(double(reg), [Nc-size(reg,1) 2-size(reg,2)], 'replicate', 'post');
+vs  = utils.pad(double(vs), [0 3-numel(vs)], 'replicate', 'post');
+
+% -------------------------------------------------------------------------
+% Regularisation structure
+regstruct = [0 0 1];       % Bending energy
+spm_field('boundary', 1);  % Neumann boundary conditions
+prm = [vs regstruct];
 
 % -------------------------------------------------------------------------
 % Compute log-likelihood (prior)
-ll = zeros(1,size(sens,4));
-for n=1:size(sens,4)
-    if size(sens, 5) == 2
-        % Two real components
-        s1 = single(sens(:,:,:,n,optim));
-    else
-        % One complex volume
-        if all(optim)
-            s1 = single(sens(:,:,:,n));
-            s1 = cat(5, real(s1), imag(s1));
-        elseif optim(1)
-            s1 = real(single(sens(:,:,:,n)));
-        elseif optim(2)
-            s1 = imag(single(sens(:,:,:,n)));
-        end
-    end
-    s1 = reshape(s1, size(s1,1),size(s1,2),size(s1,3),size(s1,5));
-    llp1 = spm_field('vel2mom', gather(s1), [vs coilfactor(n) * prm], partfactor(optim));
-    llp1 = -0.5 * double(reshape(llp1, 1, [])) * double(reshape(s1, [], 1));
-    ll(n)= llp1;
+ll = zeros(Nc,2);
+parfor(n=1:Nc, Nw)
+    reg1    = reg(n,:);
+    s1      = single(gather(sens(:,:,:,n)));
+    sr      = real(s1);
+    si      = imag(s1);
+    s1      = [];
+    llpr    = spm_field('vel2mom', sr, prm, reg1(1));
+    llpr    = -0.5 * double(llpr(:))' * double(sr(:));
+    sr      = [];
+%     llpi    = spm_field('vel2mom', si, prm, reg1(2));
+%     llpi    = -0.5 * double(llpi(:))' * double(si(:));
+    llpi    = reg1(2)*sum(sum(sum(sum(cos(b1m.bending.forward(si,vs))-1))));
+    si      = [];
+    ll(n,:) = [llpr llpi];
 end

@@ -1,5 +1,5 @@
-function mean(rho, C, ll, vs, figname)
-% FORMAT b1m.plot.mean(rho, C, ll, (vs), (figname))
+function mean(rho, A, ll, vs, figname)
+% FORMAT b1m.plot.mean(rho, A, ll, (vs), (figname))
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
@@ -29,7 +29,7 @@ rho1 = double(rho(:,:,z,:));
 % Magnitude
 p = subplot(2,3,1);
 h = imagesc(abs(rho1)); colorbar
-caxis(p, gather([0 max(abs(rho1(:)))]));
+caxis(p, gather([0 max(abs(rho1(:)))+eps]));
 colormap(h.Parent, 'gray')
 daspect(h.Parent, vs);
 axis off
@@ -49,7 +49,7 @@ title('phase')
 % Real
 p = subplot(2,3,4);
 h = imagesc(real(rho1));
-caxis(p, gather([min(real(rho1(:))) max(real(rho1(:)))]));
+caxis(p, gather([min(real(rho1(:))) max(real(rho1(:)))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -59,7 +59,7 @@ title('real')
 % Imag
 p = subplot(2,3,5);
 h = imagesc(imag(rho1));
-caxis(p, gather([min(imag(rho1(:))) max(imag(rho1(:)))]));
+caxis(p, gather([min(imag(rho1(:))) max(imag(rho1(:)))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
 axis off
@@ -67,9 +67,10 @@ title('imag')
 
 % -------------------------------------------------------------------------
 % Covariance
+C = utils.invPD(A);
 p = subplot(2,3,3);
 h = imagesc(C); colorbar
-caxis(p, gather([min(C(:)) max(C(:))]));
+caxis(p, gather([min(C(:)) max(C(:))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, [1 1 1]);
 title('covariance')

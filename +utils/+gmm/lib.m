@@ -1690,14 +1690,21 @@ function code = obs2code(X)
 %
 % Compute a "missing code" image for the input observation matrix.
 
-code = double2int(sum(bsxfun(@times, ~isnan(X), 2.^(0:size(X,2)-1)), 2));
+type = str2func(nbits2type(size(X,2)));
+
+code = type(0);
+for n=1:size(X,2)
+    bin  = type(~isnan(X(:,n)));
+    % base = type(2)^type(n-1);
+    code = bitor(code, bitshift(bin, n-1)); % bsxfun(@times, bin, base);
+end
 
 % =========================================================================
 function bin = code2bin(code, length)
 % FORMAT bin = utils.gmm.lib('code2bin', code, length)
 
-bin = dec2bin(code,length) == '1';
-bin = bin(end:-1:1);
+base = uint64(2).^uint64(0:(length-1));
+bin  = bitand(uint64(code),base) > 0;
 
 % =========================================================================
 function L = double2int(L)
@@ -1723,18 +1730,27 @@ if nargin < 2
     minval = 0;
 end
 
-type     = 'int';
-unsigned = minval >= 0;
-if unsigned
-    type   = ['u' type];
-    minval = 0;
+signed = minval < 0;
+if signed
+    minval = ceil(log2(-minval));
 else
-    minval = numel(dec2base(-minval,2));
+    minval = 0;
 end
-maxval = numel(dec2base(maxval,2));
-nbits  = max(minval,maxval);
-if unsigned
+maxval = ceil(log2(maxval));
+nbits = max(minval,maxval);
+if signed
     nbits = nbits + 1;
+end
+type = nbits2type(nbits,signed);
+
+% =========================================================================
+function type = nbits2type(nbits,signed)
+if nargin < 2
+    signed = false;
+end
+type = 'int';
+if ~signed
+    type   = ['u' type];
 end
 if nbits <= 8
     type = [type '8'];
@@ -1746,6 +1762,7 @@ elseif nbits <= 64
     type = [type '64'];
 else
     type = 'double';
+    warning('No exact integer type for nbits > %d. I''ll use double instead', nbits);
 end
 
 % =========================================================================

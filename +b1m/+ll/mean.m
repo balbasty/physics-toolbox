@@ -1,30 +1,44 @@
-function llp = mean(mean, prm, vs, part)
+function llp = mean(varargin)
 % Compute prior log-likelihood of the mean
 %
-% FORMAT ll = b1m.ll.mean(mean, prm, [vs], [part])
+% FORMAT ll = b1m.ll.mean(mean, ...)
 %
-% mean - (File)Array [Nx Ny Nz] - Complex mean image
-% prm  -       Array [1 3]      - Regularisation [a m b]
-% vs   -       Array [1 3]      - Voxel size [1 1 1]
-% part -       Array [1 2]      - Factor for magnitude/phase [1 1] 
+% REQUIRED
+% --------
+% mean - (File)Array [Nx Ny Nz 1 Nct] - Complex mean image
+%
+% KEYWORD
+% -------
+% RegFactor - Scalar       - Regularisation factor      [1]
+% VoxelSize - Array [1 3]  - Voxel size                 [1]
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
-if nargin < 4
-    part = [1 1];
-end
-if nargin < 3
-    vs = [1 1 1];
+% -------------------------------------------------------------------------
+% Parse input
+p = inputParser;
+p.FunctionName = 'b1m.ll.mean';
+p.addRequired('MeanImage',                   @utils.isarray);
+p.addParameter('RegFactor',     1,           @(X) isnumeric(X) && isscalar(X));
+p.addParameter('VoxelSize',     1,           @(X) isnumeric(X) && isrow(X) && numel(X) <= 3);
+p.parse(varargin{:});
+meanim  = p.Results.MeanImage;
+reg     = p.Results.RegFactor;
+vs      = p.Results.VoxelSize;
+
+% -------------------------------------------------------------------------
+% Regularisation structure
+if reg > 0
+    prm = [0 1 0];              % Membrane energy
+    spm_field('boundary', 1);   % Neumann boundary conditions
+else
+    llp = 0;
+    return
 end
 
 % -------------------------------------------------------------------------
 % Compute log-likelihood (prior)
-
-r1 = single(mean(:,:,:,:,:));
-r1 = cat(5, real(r1), imag(r1));
-
-llpr = spm_field('vel2mom', r1(:,:,:,:,1), [vs part(1)*prm]);
-llpr = -0.5 * double(reshape(llpr, 1, [])) * double(reshape(r1(:,:,:,:,1), [], 1));
-llpi = spm_field('vel2mom', r1(:,:,:,:,2), [vs part(2)*prm]);
-llpi = -0.5 * double(reshape(llpi, 1, [])) * double(reshape(r1(:,:,:,:,2), [], 1));
-llp = llpr + llpi;
+meanim = single(gather(meanim));
+meanim = cat(4, real(meanim), imag(meanim));
+llp    = spm_field('vel2mom', meanim, [vs reg*prm]);
+llp    = -0.5 * double(meanim(:))' * double(llp(:));

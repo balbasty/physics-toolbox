@@ -58,6 +58,11 @@ function dat = read(fname, varargin)
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
+% TODO:
+% * split [read hard header]/[select subset]/[layout]
+% * allow returning severl subparts (e.g., {'imaging' 'calibration'})
+% * for each subpart, return a struct with fields .dat and .head
+
 % -------------------------------------------------------------------------
 % Parse input arguments
 default_order = {'ch' 'rd' 'k1' 'k2' 'av' 'sl' 'ct' 'ph' 'rp' 'st' 'sg'};
@@ -357,7 +362,7 @@ end
 idx_out = cellfun(@(X) X(:), idx_out, 'UniformOutput', false);
 dim_out = [ch_size rd_size k1_size k2_size cellfun(@max, idx_out(3:end))];
 if strcmpi(layout, 'acq')
-    dim_out(2) = softHeader.encoding.encodedSpace.matrixSize.x;
+%     dim_out(2) = softHeader.encoding.encodedSpace.matrixSize.x;
     dim_out(3) = softHeader.encoding.encodedSpace.matrixSize.y;
     if unique(hardHeader.idx.slice) > 1
         dim_out(6) = softHeader.encoding.encodedSpace.matrixSize.z;

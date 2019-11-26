@@ -82,7 +82,7 @@ p.addParameter('PropPrior',  0,             @isnumeric);
 p.addParameter('GaussPrior', {},            @iscell);
 p.addParameter('Prune',      0,             @(X) isscalar(X) && isnumeric(X));
 p.addParameter('Missing',    true,          @islogical);
-p.addParameter('Start',      'kmeans',      @(X) ischar(X) || isnumeric(X));
+p.addParameter('Start',      'kmeans',      @(X) ischar(X) || isnumeric(X) || iscell(X));
 p.addParameter('KMeans',     {},            @iscell);
 p.addParameter('IterMax',    1000,          @(X) isscalar(X) && isnumeric(X));
 p.addParameter('Tolerance',  1e-4,          @(X) isscalar(X) && isnumeric(X));
@@ -139,7 +139,7 @@ else
     % Dirichlet prior
     a0              = PropPrior(:)';
     if numel(a0) < K
-        a0          = padarray(a0, [0 K - numel(a0)], 'replicate', 'post');
+        a0          = utils.pad(a0, [0 K - numel(a0)], 'replicate', 'post');
     end
     PI              = [];
     logPI           = [];
@@ -198,7 +198,7 @@ missmsk = find(missmsk); % saves a bit of memory
 % binning. Here, we assume some kind of uniform distribution inside the bin
 % and consequently add the corresponding variance to the 2nd order moment.
 if numel(E) < P
-    E = padarray(E, [0 P - numel(E)], 'replicate', 'post');
+    E = utils.pad(E, [0 P - numel(E)], 'replicate', 'post');
 end
 E = (E.^2)/12;
 
@@ -765,6 +765,15 @@ function [Z,MU,b,A,V,n,PI,logPI] = start(method, X, W, K, a0, pr, kmeans)
 %
 % Compute starting estimates
 
+
+if ischar(method)
+    methodname = method;
+elseif iscell(method) && ischar(method{1})
+    methodname = method{1};
+else
+    methodname = 'provided';
+end
+
 if ~iscell(method)
     method = {method};
 end
@@ -773,7 +782,8 @@ b = [];
 n = [];
 V = [];
 
-switch method{1}
+
+switch methodname
     
     case 'kmeans'
     % Use kmeans to produce a first clustering of the data
@@ -834,6 +844,7 @@ switch method{1}
             A = A ./ SUM; clear SUM X
             for k=1:K
                 A(:,:,k) = A(:,:,k) + A(:,:,k)'; % Ensure symmetric
+                A(:,:,k) = spm_matcomp('LoadDiag', A(:,:,k));
                 A(:,:,k) = spm_matcomp('Inv', A(:,:,k));
             end
         end
@@ -926,7 +937,7 @@ if numel(method) >= 2 || ~any(strcmpi(method{1}, {'kmeans','prior'}))
         A = diag(((maxval - minval)./(2*K)).^(-2));
     end
     if size(A,3) < K
-        A = padarray(A, [0 0 K-size(A,3)], 'replicate', 'post');
+        A = utils.pad(A, [0 0 K-size(A,3)], 'replicate', 'post');
     end
     if size(A,1) == 1
         A = bsxfun(@times, A, eye(size(X,2)));
@@ -1001,7 +1012,7 @@ end
 if ~isempty(b)
     b = b(:)';
     if numel(b) < K
-        b = padarray(b, [0 K - numel(b)], 'replicate', 'post');
+        b = utils.pad(b, [0 K - numel(b)], 'replicate', 'post');
     end
 end
 % -------------------------------------------------------------------------
@@ -1022,14 +1033,14 @@ end
 if ~isempty(n)
     n = n(:)';
     if numel(n) < K
-        n = padarray(n, [0 K - numel(n)], 'replicate', 'post');
+        n = utils.pad(n, [0 K - numel(n)], 'replicate', 'post');
     end
 end
 % -------------------------------------------------------------------------
 % Scale [default]
 if ~isempty(V)
     if size(V,3) < K
-        V = padarray(V, [0 0 K - size(V,3) ], 'replicate', 'post');
+        V = utils.pad(V, [0 0 K - size(V,3) ], 'replicate', 'post');
     end
     if size(V,1) == 1
         V = bsxfun(@times, V, eye(P));
