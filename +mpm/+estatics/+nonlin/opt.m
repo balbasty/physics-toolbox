@@ -15,8 +15,8 @@ o = setdefault(o, 'out.folder',       '.');       % Output folder
 o = setdefault(o, 'out.fname',        '.nii');    % Suffix for output files 
 o = setdefault(o, 'out.mem',          'map');     % map/load output volumes
 o = setdefault(o, 'reg.mode.default', [0 1]);     % Absolute/Membrane regul. (0=None|1=L1|2=L2)
-o = setdefault(o, 'reg.prec.default', [1E0 1E2]); % Absolute/Membrane precision
-o = setdefault(o, 'reg.prec.R2s',     [1E0 1E1]);
+o = setdefault(o, 'reg.prec.default', [1E0 5E3]); % Absolute/Membrane precision
+o = setdefault(o, 'reg.prec.R2s',     [1E0 5E0]);
 o = setdefault(o, 'reg.mean.default', NaN);       % Mean (NaN = from minilogfit)
 o = setdefault(o, 'reg.uncertainty' , 1E-3);      % RLS smoother (value|'bayes')
 o = setdefault(o, 'vs',               NaN);       % Reconstruction voxel size (Nan=from input)
@@ -28,7 +28,7 @@ o = setdefault(o, 'threads',          -1);        % Number of threads (-1=all)
 o = setdefault(o, 'verbose',          1);         % Verbosity (0=quiet|[1]=print|2=plot)
 o = setdefault(o, 'solver.type',      'relax');   % Solver type ('relax'|'cg')
 o = setdefault(o, 'solver.nbiter',    10);        % Number of iterations of the linear solver
-o = setdefault(o, 'solver.tolerance', 1e-3);      % Solver gain threshold 
+o = setdefault(o, 'solver.tolerance', 0);         % Solver gain threshold 
 o = setdefault(o, 'solver.verbose',   true);      % Solver verbosity 
 o = setdefault(o, 'solver.sumtype',   'double');  % Solver accumulator type ('double'|'native')
 o = setdefault(o, 'solver.precond',   true);      % [CG only] use preconditioner 

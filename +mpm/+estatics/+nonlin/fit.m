@@ -30,7 +30,7 @@ function out = fit(in,opt)
 %   threads      [-1]      Number of threads used by SPM
 %   solver.type      ['relax'] Solver used for L1 regularisation (relax|cg)
 %   solver.nbiter    [10]      Number of iterations of the linear solver
-%   solver.tolerance [1E-3]    Solver gain threshold for early stopping
+%   solver.tolerance [0]       Solver gain threshold for early stopping
 %   solver.verbose   [1]       Solver verbosity 
 %
 % Usually: `NaN` means 'informed default'
