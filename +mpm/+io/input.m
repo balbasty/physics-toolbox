@@ -88,7 +88,6 @@ for v=1:V
     fprintf('%d', v);
     arg1    = varargin{v};
     vol     = struct;
-    subinfo = {};
     % ---------------------------------------------------------------------
     % Fill everything that is provided (filenames, provided info)
     
@@ -323,12 +322,22 @@ switch lower(type)
             if ~isnan(prm), return; end
         end
     case 'seq'
+        % spoiled gradient echo (SGE)
         if ~isempty(regexpi(fname, 'flash'))
             prm = 'SGE';
             return
         end
         if ~isempty(path) && ~isempty(regexpi(path{end}, 'flash'))
             prm = 'SGE';
+            return
+        end
+        % spin echo stimulated echo (SESTE)
+        if ~isempty(regexpi(fname, 'seste'))
+            prm = 'SESTE';
+            return
+        end
+        if ~isempty(path) && ~isempty(regexpi(path{end}, 'seste'))
+            prm = 'SESTE';
             return
         end
 end
