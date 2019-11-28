@@ -1,7 +1,7 @@
 function X = acsub(X, mask)
-% FORMAT acdata = utils.acsub(kdata)
-%
 % Extract the autocalibration region of kspace
+%
+% FORMAT acdata = utils.acsub(kdata)
 
 dim = [size(X) 1];
 dim_other = dim(4:end);
