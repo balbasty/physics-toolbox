@@ -60,7 +60,7 @@ function [llx,g,H] = gradient(in, out, subsample)
 
         % -----------------------------------------------------------------
         % Compute log-likelihood
-        llx = llx - 0.5 * lam * sum(r.^2, 'double');
+        llx = llx - 0.5 * lam * sum(r(:).^2, 'double');
 
         % -----------------------------------------------------------------
         % Compute gradient and Hessian in observed space
