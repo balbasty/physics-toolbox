@@ -76,7 +76,10 @@ out = mpm.io.output(prefix, dim(:), mat, value, 'single', opt.out);
 % -------------------------------------------------------------------------
 % Loglinear fit
 % -------------------------------------------------------------------------
-out = mpm.estatics.loglin.fit.core(in,out,opt.subsample,opt.verbose);
+coreopt = struct('scaled',    opt.scaled, ...
+                 'subsample', opt.subsample, ...
+                 'verbose',   opt.verbose);
+out = mpm.estatics.loglin.fit.core(in,out,coreopt);
    
 % -------------------------------------------------------------------------
 % Extrapolate signal to TE=0

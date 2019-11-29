@@ -1,4 +1,4 @@
-function [out,ll] = core(in,out,subsample,verbose)
+function [out,ll] = core(in,out,opt)
 % Loglinear ESTATICS fit [core algorithm]
 %
 %   The ESTATICS model applies to multi-echo spoiled gradient-echo 
@@ -11,18 +11,21 @@ function [out,ll] = core(in,out,subsample,verbose)
 % and output structures to be already prepared. It is advised to use the
 % high-level wraper `mpm.estatics.loglin.fit` instead.
 %
-% FORMAT out = mpm.estatics.loglin.core(in,out,,[subsample],[verbose])
-% in        - Input data structure (see `mpm.io.input`)
-% out       - Output data structure (see `mpm.io.output`)
-% subsample - Subsampling distance [Inf]
-% verbose   - Verbosity (0=quiet|[1]=print|2=plot)
+% FORMAT out = mpm.estatics.loglin.core(in,out,,[opt])
+% in  - Input data structure (see `mpm.io.input`)
+% out - Output data structure (see `mpm.io.output`)
+% opt - Structure of parameters with [optional] fields:
+%   . scaled    - Scale noise precision by squared signal [false]
+%   . subsample - Subsampling distance in mm [Inf=no]
+%   . opt.verbose   - Verbosity (0=quiet|[1]=print|2=plot)
 
-if nargin < 3 || isempty(subsample) || isnan(subsample)
-    subsample = Inf;
-end
-if nargin < 4 || isempty(verbose) || isnan(verbose)
-    verbose = 1;
-end
+% -------------------------------------------------------------------------
+% Options
+% -------------------------------------------------------------------------
+if nargin < 3, opt = struct; end
+if ~isfield(opt, 'subsample'), opt.subsample = Inf;   end
+if ~isfield(opt, 'verbose'),   opt.verbose   = 0;     end
+if ~isfield(opt, 'scaled'),    opt.scaled    = false; end
 
 % -------------------------------------------------------------------------
 % Get avaiable contrasts
@@ -39,7 +42,7 @@ nbcontrasts = numel(contrasts);
 ll = [];
 for it=1:3
     
-    verbose > 0 && fprintf('Iteration %i\n', it);
+    opt.verbose > 0 && fprintf('Iteration %i\n', it);
     
     % ---------------------------------------------------------------------
     % Update maps
@@ -51,12 +54,12 @@ for it=1:3
     
     % ---------------------------------------------------------------------
     % Loop over echoes (can be parallelised using parfor)
-    verbose > 0 && fprintf('Gradient: data ');
+    opt.verbose > 0 && fprintf('Gradient: data ');
     for v=1:numel(in)
-        verbose > 0 && fprintf('%d',v);
+        opt.verbose > 0 && fprintf('%d',v);
 
         % - Compute gradient
-        [llx1,g1,H1] = mpm.estatics.loglin.gradient(in{v}, out, subsample, verbose);
+        [llx1,g1,H1] = mpm.estatics.loglin.gradient(in{v}, out, opt);
         llx = llx + llx1;
 
         % - Get index
@@ -71,9 +74,9 @@ for it=1:3
         H(:,:,:,Hind) = H(:,:,:,Hind) + H1;
         clear H1
 
-        verbose > 0 && fprintf(' ');
+        opt.verbose > 0 && fprintf(' ');
     end
-    verbose > 0 && fprintf('\n');
+    opt.verbose > 0 && fprintf('\n');
     
     
     % ---------------------------------------------------------------------
@@ -86,7 +89,7 @@ for it=1:3
     
     % ---------------------------------------------------------------------
     % Gauss-Newton
-    verbose > 0 && fprintf('Gauss-Newton update\n');
+    opt.verbose > 0 && fprintf('Gauss-Newton update\n');
     dy = mpm.l0.solve(H,g);
     clear H g
     for k=1:nbcontrasts
@@ -102,5 +105,5 @@ for it=1:3
     
     % ---------------------------------------------------------------------
     % Plot
-    verbose > 1 && mpm.estatics.plot.progress(out,ll);
+    opt.verbose > 1 && mpm.estatics.plot.progress(out,ll);
 end

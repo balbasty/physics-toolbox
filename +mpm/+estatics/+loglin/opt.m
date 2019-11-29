@@ -14,6 +14,7 @@ o = setdefault(o, 'out.mem',          'map');     % map/load output volumes
 o = setdefault(o, 'fov',              0);         % Field of view (0=bounding box|n=index of input volume)
 o = setdefault(o, 'vs',               NaN);       % Reconstruction voxel size (Nan=from input)
 o = setdefault(o, 'coreg',            true);      % Co-register volumes first
+o = setdefault(o, 'scaled',           false);     % Scale variance to combat bias
 o = setdefault(o, 'subsample',        Inf);       % Subsampling distance (Inf=no subsampling)
 o = setdefault(o, 'threads',          -1);        % Number of threads (-1=all)
 o = setdefault(o, 'verbose',          1);         % Verbosity (0=quiet|[1]=print|2=plot)
