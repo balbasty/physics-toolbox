@@ -323,9 +323,9 @@ for s=numel(scales):-1:1
         % -----------------------------------------------------------------
         % Plot
         opt.verbose > 1 && mpm.estatics.plot.progress(out,ll);
-        fprintf('%s\n', repmat('-',[1 80]));
-        fprintf('ll = %7.3g | llx = %7.3g | lly = %7.3g | gain = %7.3g\n', ll(end), llx, lly, gain);
-        fprintf('%s\n', repmat('-',[1 80]));
+        opt.verbose > 0 && fprintf('%s\n', repmat('-',[1 80]));
+        opt.verbose > 0 && fprintf('ll = %7.3g | llx = %7.3g | lly = %7.3g | gain = %7.3g\n', ll(end), llx, lly, gain);
+        opt.verbose > 0 && fprintf('%s\n', repmat('-',[1 80]));
        
         % -----------------------------------------------------------------
         % Out?
