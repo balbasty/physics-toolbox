@@ -1,187 +1,188 @@
-function mpm = estatics_to_mpm(out, in, pre, mpmfit)
+function out = to_mpm(estatics, in, pre, coreg)
+% Generate MPM maps from ESTATICS fits using rational approximations of the
+% spoiled gradient-echo signal equation.
+%
+% FORMAT out = mpm.estatics.to_mpm(estatics, in, [pre], [coreg])
+% estatics - Output structure returned by `mpm.estatics.<mode>.fit`
+% in       - Input data structure returned by `mpm.io.input`
+% pre      - Structure of precomputed B1+\- maps (`mpm.io.precomputed`)
+% coreg    - Coregister pre-computed B1 maps with estatics maps [true]
+% out      - Output structure with fields: A, R1, [MT]
 
-    if nargin < 3
+% TODO: `in` is only used to get flip angles. It would be better to store
+% them in `estatics` beforehand.
+
+    if nargin < 4
+        coreg = true;
+    end
+    if nargin < 3 || isempty(pre)
         pre = struct;
     end
-    if nargin < 4
-        mpmfit = false;
-    end
 
-    outfolder = fileparts(out.PDw.dat.fname);
-    if mpmfit
-        mpm = prepare_output({'A' 'R2' 'R1' 'MT'}, out.dim, out.mat, outfolder, 'mpm.nii', [0 0 0 0]);
-    else
-        mpm = prepare_output({'A' 'R1' 'MT'}, out.dim, out.mat, outfolder, 'mpm.nii', [0 0 0]);
+    opt.folder = fileparts(estatics.PDw.dat.fname);
+    opt.fname  = '.nii';
+    prefix = {'A' 'R1'};
+    values = [0 0];
+    if isfield(estatics, 'MTw')
+        prefix = [prefix {'MT'}];
+        values = [values 0];
     end
+    out = mpm.io.output(prefix, estatics.dim(:), estatics.mat, values', 'single', opt);
     
     threshold_R1 = 2;
     threshold_A  = 100000;
     threshold_MT = 5;
     
-    
-    % ---------------------------------------------------------------------
-    % R2
-    % ---------------------------------------------------------------------
-    R2 = single(out.R2.dat());
-    R2(R2 < eps('single')) = eps('single');
-    if mpmfit
-        R2 = log(R2);
+    for v=1:numel(in)
+        switch in{v}.type
+            case 'PDw'
+                FA_PDw = in{v}.FA;
+                TR_PDw = in{v}.TR;
+            case 'T1w'
+                FA_T1w = in{v}.FA;
+                TR_T1w = in{v}.TR;
+            case 'MTw'
+                FA_MTw = in{v}.FA;
+                TR_MTw = in{v}.TR;
+        end
     end
-    mpm.R2.dat(:,:,:) = R2;
-    clear  R2
     
     % ---------------------------------------------------------------------
     % Read PDw data
     % ---------------------------------------------------------------------
-    
-    
-    lB1r = 0;
-    if isfield(pre, 'B1r')
-        i_B1r = find(pre.B1r.vol == 1);
-        if isempty(i_B1r)
-            i_B1r = find(pre.B1r.vol == Inf);
-        end
-        if ~isempty(i_B1r)
-            lB1r = pull(single(pre.B1r.dat{i_B1r}()), out.dim, pre.B1r.mat(:,:,i_B1r)\out.mat(:,:,1));
-            lB1r = log(max(lB1r, eps('single')));
-        end
+    B1m = 0;
+    if isfield(pre, 'B1m')
+        if     isfield(pre.B1m, 'PDw'), B1m = pre.B1m.PDw;
+        elseif isfield(pre.B1m, 'all'), B1m = pre.B1m.all;
+        else,                           B1m = pre.B1m; end
+        if coreg, T = utils.coreg({estatics.PDw.dat.fname estatics.PDw.mat}, ...
+                                  {B1m.struct.fname B1m.mat});
+        else,     T = eye(4); end
+        B1m = pull(single(B1m.map()), estatics.dim, (T\B1m.mat)\estatics.PDw.mat);
+        B1m = log(max(B1m, eps('single')));
     end
-    PDw    = exp(single(out.PDw.dat()) - lB1r);
-    clear lB1r
+    PDw = exp(single(estatics.PDw.dat()) - B1m);
+    clear B1m
     
     
-    B1t = 1;
-    if isfield(pre, 'B1t')
-        i_B1t = find(pre.B1t.vol == 1);
-        if isempty(i_B1t)
-            i_B1t = find(pre.B1t.vol == Inf);
-        end
-        if ~isempty(i_B1t)
-            B1t = pull(single(pre.B1t.dat{i_B1t}()), out.dim, pre.B1t.mat(:,:,i_B1t)\out.mat(:,:,1));
-            B1t = max(B1t/100, eps('single'));
-        end
+    B1p = 1;
+    if isfield(pre, 'B1p')
+        if     isfield(pre.B1p, 'PDw'), B1p = pre.B1p.PDw;
+        elseif isfield(pre.B1p, 'all'), B1p = pre.B1p.all;
+        else,                           B1p = pre.B1p; end
+        if coreg, T = utils.coreg({estatics.PDw.dat.fname estatics.PDw.mat}, ...
+                                  {B1p.struct.fname B1p.mat});
+        else,     T = eye(4); end
+        if strcmpi(B1p.unit, 'p.u.'), norm = 100; else, norm = 1; end
+        B1p = pull(single(B1p.map()), estatics.dim, (T\B1p.mat)\estatics.PDw.mat);
+        B1p = max(B1p/norm, eps('single'));
     end
-    FA_PDw = in.FA(1) * B1t;
-    clear B1t
-    
-    TR_PDw = in.TR(1);
+    FA_PDw = FA_PDw * B1p;
+    clear B1p
     
     % ---------------------------------------------------------------------
     % Read T1w data
     % ---------------------------------------------------------------------
     
-    lB1r = 0;
-    if isfield(pre, 'B1r')
-        i_B1r = find(pre.B1r.vol == 2);
-        if isempty(i_B1r)
-            i_B1r = find(pre.B1r.vol == Inf);
-        end
-        if ~isempty(i_B1r)
-            lB1r = pull(single(pre.B1r.dat{i_B1r}()), out.dim, pre.B1r.mat(:,:,i_B1r)\out.mat(:,:,1));
-            lB1r = log(max(lB1r, eps('single')));
-        end
+    B1m = 0;
+    if isfield(pre, 'B1m')
+        fprintf('Read B1m (T1w)\n');
+        if     isfield(pre.B1m, 'PDw'), B1m = pre.B1m.T1w;
+        elseif isfield(pre.B1m, 'all'), B1m = pre.B1m.all;
+        else,                           B1m = pre.B1m; end
+        if coreg, T = utils.coreg({estatics.T1w.dat.fname estatics.T1w.mat}, ...
+                                  {B1m.struct.fname B1m.mat});
+        else,     T = eye(4); end
+        B1m = pull(single(B1m.map()), estatics.dim, (T\B1m.mat)\estatics.T1w.mat);
+        B1m = log(max(B1m, eps('single')));
     end
-    T1w    = exp(single(out.T1w.dat()) - lB1r);
-    clear lB1r
+    fprintf('Read T1w\n');
+    T1w = exp(single(estatics.T1w.dat()) - B1m);
+    clear B1m
     
-    B1t = 1;
-    if isfield(pre, 'B1t')
-        i_B1t = find(pre.B1t.vol == 2);
-        if isempty(i_B1t)
-            i_B1t = find(pre.B1t.vol == Inf);
-        end
-        if ~isempty(i_B1t)
-            B1t = pull(single(pre.B1t.dat{i_B1t}()), out.dim, pre.B1t.mat(:,:,i_B1t)\out.mat(:,:,1));
-            B1t = max(B1t/100, eps('single'));
-        end
+    B1p = 1;
+    if isfield(pre, 'B1p')
+        fprintf('Read B1p (T1w)\n');
+        if     isfield(pre.B1p, 'PDw'), B1p = pre.B1p.T1w;
+        elseif isfield(pre.B1p, 'all'), B1p = pre.B1p.all;
+        else,                           B1p = pre.B1p; end
+        if coreg, T = utils.coreg({estatics.T1w.dat.fname estatics.T1w.mat}, ...
+                                  {B1p.struct.fname B1p.mat});
+        else,     T = eye(4); end
+        if strcmpi(B1p.unit, 'p.u.'), norm = 100; else, norm = 1; end
+        B1p = pull(single(B1p.map()), estatics.dim, (T\B1p.mat)\estatics.T1w.mat);
+        B1p = max(B1p/norm, eps('single'));
     end
-    FA_T1w = in.FA(2) .* B1t;
-    clear B1t
-    
-    TR_T1w = in.TR(2);
+    FA_T1w = FA_T1w .* B1p;
+    clear B1p
     
     % ---------------------------------------------------------------------
     % R1
     % ---------------------------------------------------------------------
+    fprintf('Compute R1\n');
     R1 = 0.5 * ( T1w .* (FA_T1w ./ TR_T1w) - PDw .* (FA_PDw ./ TR_PDw) ) ... 
          ./ max( (PDw ./ FA_PDw) - (T1w ./ FA_T1w), eps('single') );
     R1(R1 < eps('single')) = eps('single');
     R1(R1 > threshold_R1) = threshold_R1;
-    if mpmfit
-        R1 = log(R1);
-    end
-    mpm.R1.dat(:,:,:) = R1;
+    out.R1.dat(:,:,:) = R1;
     
     % ---------------------------------------------------------------------
     % A
     % ---------------------------------------------------------------------
+    fprintf('Compute A\n');
     A = ( T1w .* PDw ) .* ( TR_T1w .* (FA_PDw ./ FA_T1w) - TR_PDw .* (FA_T1w ./ FA_PDw) ) ... 
         ./ ( PDw .* (TR_PDw .* FA_PDw) - T1w .* (TR_T1w .* FA_T1w) );
     A(A < eps('single')) = eps('single');
     A(A > threshold_A) = threshold_A;
-    if mpmfit
-        A = log(A);
-    end
-    mpm.A.dat(:,:,:) = A;
+    out.A.dat(:,:,:) = A;
     
     
-    if numel(in.TR) >= 3
+    if isfield(estatics, 'MTw')
         % -----------------------------------------------------------------
         % Read MTw data
         % -----------------------------------------------------------------
         clear T1w PDw
-        lB1r = 0;
-        if isfield(pre, 'B1r')
-            i_B1r = find(pre.B1r.vol == 3);
-            if isempty(i_B1r)
-                i_B1r = find(pre.B1r.vol == Inf);
-            end
-            if ~isempty(i_B1r)
-                lB1r = pull(single(pre.B1r.dat{i_B1r}()), out.dim, pre.B1r.mat(:,:,i_B1r)\out.mat(:,:,1));
-                lB1r = log(max(lB1r, eps('single')));
-            end
+        B1m = 0;
+        if isfield(pre, 'B1m')
+            fprintf('Read B1m (MTw)\n');
+            if     isfield(pre.B1m, 'PDw'), B1m = pre.B1m.MTw;
+            elseif isfield(pre.B1m, 'all'), B1m = pre.B1m.all;
+            else,                           B1m = pre.B1m; end
+            if coreg, T = utils.coreg({estatics.MTw.dat.fname estatics.MTw.mat}, ...
+                                      {B1m.struct.fname B1m.mat});
+            else,     T = eye(4); end
+            B1m = pull(single(B1m.map()), estatics.dim, (T\B1m.mat)\estatics.MTw.mat);
+            B1m = log(max(B1m, eps('single')));
         end
-        MTw    = exp(single(out.MTw.dat()) - lB1r);
-        clear lB1r
+        fprintf('Read MTw\n');
+        MTw = exp(single(estatics.MTw.dat()) - B1m);
+        clear B1m
         
-        B1t = 1;
-        if isfield(pre, 'B1t')
-            i_B1t = find(pre.B1t.vol == 3);
-            if isempty(i_B1t)
-                i_B1t = find(pre.B1t.vol == Inf);
-            end
-            if ~isempty(i_B1t)
-                B1t = pull(single(pre.B1t.dat{i_B1t}()), out.dim, pre.B1t.mat(:,:,i_B1t)\out.mat(:,:,1));
-                B1t = max(B1t/100, eps('single'));
-            end
+        B1p = 1;
+        if isfield(pre, 'B1p')
+            fprintf('Read B1p (MTw)\n');
+            if     isfield(pre.B1p, 'PDw'), B1p = pre.B1p.MTw;
+            elseif isfield(pre.B1p, 'all'), B1p = pre.B1p.all;
+            else,                           B1p = pre.B1p; end
+            if coreg, T = utils.coreg({estatics.MTw.dat.fname estatics.MTw.mat}, ...
+                                      {B1p.struct.fname B1p.mat});
+            else,     T = eye(4); end
+            if strcmpi(B1p.unit, 'p.u.'), norm = 100; else, norm = 1; end
+            B1p = pull(single(B1p.map()), estatics.dim, (T\B1p.mat)\estatics.MTw.mat);
+            B1p = max(B1p/norm, eps('single'));
         end
-        FA_MTw = in.FA(3) * B1t;
-        clear B1t
-        
-        TR_MTw = in.TR(3);
+        FA_MTw = FA_MTw * B1p;
+        clear B1p
 
         % -----------------------------------------------------------------
         % MT
         % -----------------------------------------------------------------
+        fprintf('Compute MT\n');
         MT = (FA_MTw .* A ./ MTw - 1) .* R1 .* TR_MTw - 0.5 .* FA_MTw.^2;
         MT = MT * 100;
         MT(MT < eps('single')) = eps('single');
         MT(MT > threshold_MT) = threshold_MT;
-        if mpmfit
-            MT = MT/100;
-            MT = log(MT./(1-MT));
-        end
-        mpm.MT.dat(:,:,:) = MT;
-    else
-        mpm.MT.dat(:,:,:) = 0;
-    end
-    
-    if mpmfit
-        mpm.dat = cat(4, mpm.A.dat, mpm.R2.dat, mpm.R1.dat, mpm.MT.dat);
-        mpm.A.idx  = 1;
-        mpm.R2.idx = 2;
-        mpm.R1.idx = 3;
-        mpm.MT.idx = 4;
+        out.MT.dat(:,:,:) = MT;
     end
 end
 
