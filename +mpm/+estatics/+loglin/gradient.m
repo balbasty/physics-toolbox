@@ -5,9 +5,9 @@ function [llx,g,H] = gradient(in, out, opt)
 % in  - Input data structure
 % out - Model data structure 
 % opt - Structure of parameters with [optional] fields:
-%   . scaled    - Scale noise precision by squared signal [false]
-%   . subsample - Subsampling distance in mm [Inf=no]
-%   . verbose   - Verbosity level [0]
+%       . scaled    - Scale noise precision by squared signal [false]
+%       . subsample - Subsampling distance in mm [Inf=no]
+%       . verbose   - Verbosity level [0]
 %
 % The 'scaled' option takes into account that 
 %   Var[log x] \approx Var[x]/(E[x]^2)
