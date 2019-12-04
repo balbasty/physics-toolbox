@@ -1,8 +1,8 @@
-function f = progress(out,ll,figname)
+function f = progress(out,ll,scl,figname)
 
     % ---------------------------------------------------------------------
     % Get figure object
-    if nargin < 3 || isempty(figname)
+    if nargin < 4 || isempty(figname)
         figname = 'MPM fit';
     end
     f = findobj('Type', 'Figure', 'Name', figname);
@@ -11,6 +11,13 @@ function f = progress(out,ll,figname)
     end
     set(0, 'CurrentFigure', f);   
     clf(f);
+    
+    if nargin < 3 || isempty(scl)
+        scl = ones(1,numel(ll));
+    end
+    if ~isempty(scl)
+        colours = hsv(max(scl));
+    end
     
     
     ncol = 4;
@@ -102,6 +109,7 @@ function f = progress(out,ll,figname)
         
         subplot(nrow,ncol,i);
         imagesc(out.U.dat(:,:,z,4));
+        caxis([0 80]);
         colormap('gray');
         colorbar;
         axis off
@@ -124,8 +132,20 @@ function f = progress(out,ll,figname)
     % ---------------------------------------------------------------------
     % Negative log-likelihood
     subplot(nrow,ncol,i);
-    plot(ll, '-s', 'MarkerFaceColor','b');
+    plot(ll, 'k');
+    hold on
+    x = 1:numel(ll);
+    for s=unique(scl)
+        p = plot(x(scl==s),ll(scl==s));
+        p.LineStyle = 'none';
+        p.Marker = 's';
+        p.MarkerEdgeColor = 'none';
+        p.MarkerFaceColor = colours(s,:);
+    end
+    hold off
     title('Log-likelihood');
 
     drawnow
+    
+    f = true;
 end

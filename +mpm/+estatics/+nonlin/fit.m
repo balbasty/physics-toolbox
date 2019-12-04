@@ -158,6 +158,7 @@ opt.verbose > 1 && mpm.estatics.plot.progress(out,[]);
 % -------------------------------------------------------------------------
 opt.verbose > 0 && fprintf('Full nonlinear fit\n');
 ll = [];
+scl = [];
 opt.reg.prec0 = opt.reg.prec;
 for s=numel(scales):-1:1
     
@@ -282,6 +283,7 @@ for s=numel(scales):-1:1
         % -----------------------------------------------------------------
         % Log-likelihood
         ll = [ll llx+lly];
+        scl = [scl s];
 
         % -----------------------------------------------------------------
         % Load diagonal of the Hessian
@@ -328,7 +330,7 @@ for s=numel(scales):-1:1
 
         % -----------------------------------------------------------------
         % Plot
-        opt.verbose > 1 && mpm.estatics.plot.progress(out,ll);
+        opt.verbose > 1 && mpm.estatics.plot.progress(out,ll,scl);
         opt.verbose > 0 && fprintf('%s\n', repmat('-',[1 80]));
         opt.verbose > 0 && fprintf('ll = %7.3g | llx = %7.3g | lly = %7.3g | gain = %7.3g\n', ll(end), llx, lly, gain);
         opt.verbose > 0 && fprintf('%s\n', repmat('-',[1 80]));
@@ -346,6 +348,7 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     if s ~= 1
         out = mpm.resize_output(out, scales(s-1).dim);
+        opt.verbose > 1 && mpm.estatics.plot.progress(out,ll,scl);
     end
     
 end
