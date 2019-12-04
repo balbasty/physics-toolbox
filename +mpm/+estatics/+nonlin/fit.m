@@ -131,6 +131,11 @@ if any(opt.reg.mode(:,2)==1)
 end
 % --- Create
 out = mpm.io.output(prefix, dim, mat, value, 'single', opt.out);
+% --- Save TR/FA
+for v=1:numel(in)
+    out.(in{v}.type).extras.TR = in{v}.TR;
+    out.(in{v}.type).extras.FA = in{v}.FA;
+end
 
 % -------------------------------------------------------------------------
 % Initialise with loglinear fit
