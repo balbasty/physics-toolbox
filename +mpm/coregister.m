@@ -1,33 +1,53 @@
-function in = coregister(in)
+function [in,pre] = coregister(in,pre)
 
-    % ---------------------------------------------------------------------
-    % Is 2D?
-    is2d = in{1}.dim(3) == 1;
-    if is2d
-        in.trf = repmat(eye(4), size(in.mat,3));
-        in.mat = in.mat0;
-        return
-    end
+% -------------------------------------------------------------------------
+% INPUT DATA
+% --- REFERENCE (vol == 1)
+ref     = spm_vol(in{1}.echoes{1}.dat.fname);
+ref.mat = in{1}.mat;
+% --- MOVING (vol > 1)
+for v=2:numel(in)
+    fprintf('Register %s to %s', in{v}.type, in{1}.type);
+    in{v}.trf = utils.coreg(ref, {in{v}.echoes{1}.dat.fname, in{v}.mat});
+    in{v}.mat = in{v}.trf\in{v}.mat;
+    in{v}.trf = in{v}.mat0/in{v}.mat;
+end
 
-    % ---------------------------------------------------------------------
-    % REFERENCE (vol == 1)
-    ref = spm_vol(in{1}.echoes{1}.dat.fname);
-    in{1}.trf = eye(4);
-    in{1}.mat = in{1}.trf\in{1}.mat0;
-    ref.mat   = in{1}.mat;
-    
-    % ---------------------------------------------------------------------
-    % MOVING (vol > 1)
-    for v=2:numel(in)
-        in{v}.mat = in{v}.trf\in{v}.mat0;
-        mov = spm_vol(in{v}.echoes{1}.dat.fname);
-        for fwhm = [21 14 7]
-            mov.mat = in{v}.mat;
-            q   = spm_coreg(ref,mov,struct('fwhm',[fwhm fwhm]));
-            in{v}.trf = spm_matrix(q(:)');
-            in{v}.mat = in{v}.trf\in{v}.mat;
-            in{v}.trf = in{v}.mat0/in{v}.mat;
+% -------------------------------------------------------------------------
+% PRECOMPUTED
+% This bit is ugly. Level2 encodes contrast-specific maps, which should be
+% registered to the appropriate volumes. Maps without a level2 (or whose
+% level2 is 'all' or 'default') should be registered with the reference
+% volume.
+if nargin > 1 && ~isempty(pre)
+    levels1 = fieldnames(pre);
+    for i=1:numel(levels1)
+        level1 = pre.(levels1{i});
+        if isfield(level1, 'struct')
+            fprintf('Register %s to %s', levels1{i}, in{1}.type);
+            level1.trf = utils.coreg({in{1}.echoes{1}.dat.fname in{1}.mat}, ...
+                                     {level1.struct.fname, level1.mat});
+            level1.mat = level1.trf\level1.mat;
+            level1.trf = level1.mat0/level1.mat;
+        else
+            levels2 = fieldnames(level1);
+            for j=1:numel(levels2)
+                level2 = level1.(levels2{j});
+                ref = in{1};
+                for v=1:numel(in)
+                    if strcmpi(in{v}.type, levels2{j})
+                        ref = in{v};
+                        break
+                    end
+                end
+                if isfield(level2, 'struct')
+                    fprintf('Register %s.%s to %s', levels1{i}, levels2{j}, ref.type);
+                    level2.trf = utils.coreg({ref.echoes{1}.dat.fname ref.mat}, ...
+                                             {level2.struct.fname, level2.mat});
+                    level2.mat = level2.trf\level2.mat;
+                    level2.trf = level2.mat0/level2.mat;
+                end
+            end
         end
     end
-    
 end
