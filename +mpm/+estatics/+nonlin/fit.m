@@ -84,7 +84,7 @@ opt.reg.mean = cellfun(@(x) reg0.mean.(x), contrasts(:));
 % --- estimate mean parameter value + correct regularisation
 opt.verbose > 0 && fprintf('Guess mean parameter value to correct regularisation\n');
 mu = mpm.estatics.loglin.fit.mini(in);
-mu = cellfun(@(x) mu.(x), contrasts(:));
+mu = cellfun(@(x) mu.(x).dat, contrasts(:));
 opt.reg.mean(isnan(opt.reg.mean)) = mu(isnan(opt.reg.mean));
 opt.reg.prec(:,2) = opt.reg.prec(:,2) ./ abs(mu(:));
 for n=1:numel(mu)
