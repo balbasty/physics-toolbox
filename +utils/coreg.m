@@ -14,6 +14,9 @@ function M = coreg(fref,varargin)
 % fwhm - Vector of decreasing FWHM for histogram smoothing [21 14 7]
 % T    - 4x4xN transformation matrices.
 %        Use M <- T\M to bring `ref` and `mov` in alignement.
+%
+% Note that `spm_vol` structures can be given as input instead of
+% filenames.
 
 % -------------------------------------------------------------------------
 % FWHM
