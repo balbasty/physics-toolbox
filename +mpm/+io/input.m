@@ -356,7 +356,7 @@ switch lower(type)
                 case {'te' 'tr' 'fa'}
                     prm = str2double(res.prm);
                 case 'so'
-                    prm = strcmpi(res.prm, 'mt');
+                    prm = upper(res.prm);
             end
             switch res.unit
                 case 'ms'
@@ -412,7 +412,8 @@ if exist(fname, 'file')
             prm = str2double(res.prm);
             prm = prm * pi / 180;
         case 'so'
-            prm = strcmpi(prm, 'mt');
+            prm = upper(prm);
+            % prm = strcmpi(prm, 'mt');
         case 'seq'
             prm = ~isempty(regexpi(prm, '(fl3d|flash)'));
             if prm, prm = 'SGE';

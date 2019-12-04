@@ -1,8 +1,8 @@
-function f = mpm_plot_progress(out,ll,figname)
+function f = progress(out,ll,scl,figname)
 
     % ---------------------------------------------------------------------
     % Get figure object
-    if nargin < 3 || isempty(figname)
+    if nargin < 4 || isempty(figname)
         figname = 'MPM fit';
     end
     f = findobj('Type', 'Figure', 'Name', figname);
@@ -12,67 +12,119 @@ function f = mpm_plot_progress(out,ll,figname)
     set(0, 'CurrentFigure', f);   
     clf(f);
     
+    if nargin < 3 || isempty(scl)
+        scl = ones(1,numel(ll));
+    end
+    if ~isempty(scl)
+        colours = hsv(max(scl));
+    end
+    
+    ncol = 4;
+    if isfield(out, 'U')
+        nrow = 3;
+    else
+        nrow = 2;
+    end
+    i = 1;
     
     % ---------------------------------------------------------------------
     % z-slice to plot
-    z = ceil(size(out.R1.dat,3)/2);
+    z = ceil(2*out.dim(3)/3);
     
     % ---------------------------------------------------------------------
-    % A
-    subplot(2,3,1);
-    imagesc(exp(out.A.dat(:,:,z)));
-    colormap('gray');
-    caxis([0 1E5]);
-    colorbar;
-    axis off
-    title('A (Proton density)');
+    % PD
+    if isfield(out, 'logA')
+        subplot(nrow,ncol,i);
+        imagesc(exp(out.logA.dat(:,:,z)));
+        colormap('gray');
+        colorbar;
+        axis off
+        title('A');
+        i = i+1;
+    end
     
     % ---------------------------------------------------------------------
-    % R1
-    subplot(2,3,2);
-    imagesc(exp(out.R1.dat(:,:,z)));
-    colormap('gray');
-    caxis([0 2]);
-    colorbar;
-    axis off
-    title('R1');
+    % T1
+    if isfield(out, 'logR1')
+        subplot(nrow,ncol,i);
+        imagesc(exp(out.logR1.dat(:,:,z)));
+        caxis([0 2]);
+        colormap('gray');
+        colorbar;
+        axis off
+        title('R1');
+        i = i+1;
+    end
     
     % ---------------------------------------------------------------------
     % MT
-    subplot(2,3,3);
-    imagesc(1./(1+exp(-out.MT.dat(:,:,z))));
-    colormap('gray');
-    caxis([0 0.05]);
-    colorbar;
-    axis off
-    title('MT');
+    if isfield(out, 'logMT')
+        subplot(nrow,ncol,i);
+        imagesc(1./1-exp(-out.logMT.dat(:,:,z)));
+        caxis([0 0.05]);
+        colormap('gray');
+        colorbar;
+        axis off
+        title('MT');
+        i = i+1;
+    end
     
     % ---------------------------------------------------------------------
     % R2
-    subplot(2,3,4);
-    imagesc(exp(out.R2.dat(:,:,z)));
-    colormap('gray');
-    caxis([0 80]);
-    colorbar;
-    axis off
-    title('R2^*');
+    if isfield(out, 'logR2s')
+        subplot(nrow,ncol,i);
+        imagesc(exp(out.logR2s.dat(:,:,z)));
+        caxis([0 80]);
+        colormap('gray');
+        colorbar;
+        axis off
+        title('R2^*');
+        i = i+1;
+    end
     
+    % ---------------------------------------------------------------------
+    % Uncertainty
+    if isfield(out, 'U')
+        for j=1:size(out.U.dat, 4)
+            subplot(nrow,ncol,i);
+            imagesc(out.U.dat(:,:,z,j));
+            colormap('gray');
+            colorbar;
+            axis off
+            title('Uncertainty');
+            i = i+1;
+        end
+    end
+        
     % ---------------------------------------------------------------------
     % MTV weights
     if isfield(out, 'W')
-        subplot(2,3,5);
+        subplot(nrow,ncol,i);
         imagesc(out.W.dat(:,:,z));
         colormap('gray');
         colorbar;
         axis off
         title('MTV weights');
+        i = i+1;
     end
     
     % ---------------------------------------------------------------------
     % Negative log-likelihood
-    subplot(2,3,6);
-    plot(ll);
+    subplot(nrow,ncol,i);
+    plot(ll, 'k');
+    hold on
+    x = 1:numel(ll);
+    for s=unique(scl)
+        p = plot(x(scl==s),ll(scl==s));
+        p.LineStyle = 'none';
+        p.Marker = 's';
+        p.MarkerEdgeColor = 'none';
+        p.MarkerFaceColor = colours(s,:);
+    end
+    hold off
     title('Log-likelihood');
 
     drawnow
+    
+    f = true;
 end
