@@ -198,7 +198,8 @@ for s=numel(scales):-1:1
             opt.verbose > 0 && fprintf('%d',v);
 
             % - Compute gradient
-            [llx1,g1,H1] = mpm.estatics.nonlin.gradient(in{v}, out, sub);
+            subopt = struct('subsample', sub, 'verbose', opt.verbose);
+            [llx1,g1,H1] = mpm.estatics.nonlin.gradient(in{v}, out, subopt);
             llx = llx + llx1;
 
             % - Get index
