@@ -12,7 +12,7 @@ function out = mini(in)
             for e=1:numel(vol.echoes)
                 echo = vol.echoes{e};
                 c{end+1} = vol.type;
-                x(end+1) = log(max(echo.mean, eps('single')));
+                x(end+1) = log(max(echo.mean, double(eps('single'))));
                 t(end+1) = -echo.TE;
             end
         end
@@ -38,8 +38,19 @@ function out = mini(in)
     y = B * x;
     out = struct;
     for i=unique(idx(:)')
-        out.(contrasts{i}) = y(i);
+        out.(contrasts{i}).dat = y(i);
     end
-    out.R2s = y(end);
+    out.R2s.dat = y(end);
+    
+    % ---------------------------------------------------------------------
+    % TR /Flip Angle
+    % ---------------------------------------------------------------------
+    for v=1:numel(in)
+        vol = in{v};
+        if strcmpi(vol.seq, 'SGE')
+            out.(vol.type).FA = vol.FA;
+            out.(vol.type).TR = vol.TR;
+        end
+    end
         
 end
