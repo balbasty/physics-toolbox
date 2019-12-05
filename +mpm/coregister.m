@@ -1,4 +1,17 @@
 function [in,pre] = coregister(in,pre)
+% Coregister input volumes (and preocmputed maps) together.
+%
+%   The first echo of each volume is used for co-registration. The first
+%   volume of the input structure (`in{1}`) is taken as the reference.
+%   If a `pre` structure is provided, structural scans (e.g., 
+%   `pre.B1p.struct`) are used for co-registration.
+%
+% FORMAT [in,[pre]] = mpm.coregister(in,[pre])
+% in  - Input structure (obtained from `mpm.io.input`)
+% pre - Precomputed maps structure (obtained from `mpm.io.precomputed`)
+%
+% This function alters the fields 'trf' and 'mat' of each volume (but does
+% not alter the headers of the files on disk).
 
 % -------------------------------------------------------------------------
 % INPUT DATA
