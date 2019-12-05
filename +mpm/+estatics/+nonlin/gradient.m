@@ -94,9 +94,9 @@ end
 % -------------------------------------------------------------------------
 % Push gradient and Hessian to model space
 if nargout > 1
-    g = utils.push(g, mat, ydim);
+    g = utils.push(factor*g, mat, ydim);
     if nargout > 2
-        H = utils.push(H, mat, ydim);
+        H = utils.push(factor*H, mat, ydim);
     end
 end
 
