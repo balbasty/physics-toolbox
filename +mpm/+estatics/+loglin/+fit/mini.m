@@ -1,4 +1,18 @@
 function out = mini(in)
+% Mini ESTATICS loglinear fit based on the mean echo intensity across the
+% whole volume.
+%
+%   This function can be used to get a ballpark estimate of the mean 
+%   ESTATICS parameters by fitting the ESTATICS model to single values 
+%   per acquired echo.
+%
+% FORMAT out = mini(in)
+% in  - Input structure returned by `mpm.io.input`
+% out - Output structure with one field per parameter (e.g. 'T1w', 'R2s')
+%       and subfields:
+%       .dat - Estimated parameter value
+%       .FA  - Flip angle (all parameters but R2s)
+%       .TR  - Repetion time (all parameters but R2s)
 
     % ---------------------------------------------------------------------
     % GET MINI VALUES
