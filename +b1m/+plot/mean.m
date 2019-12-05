@@ -25,9 +25,14 @@ set(0, 'CurrentFigure', f);
 z    = ceil(size(rho,3)/2);
 rho1 = double(rho(:,:,z,:));
 
+
+iscplx = ~isreal(rho);
+ncol   = 2 + iscplx;
+nrow   = 2;
+
 % -------------------------------------------------------------------------
 % Magnitude
-p = subplot(2,3,1);
+p = subplot(nrow,ncol,sub2ind([ncol nrow],1,1));
 h = imagesc(abs(rho1)); colorbar
 caxis(p, gather([0 max(abs(rho1(:)))+eps]));
 colormap(h.Parent, 'gray')
@@ -37,38 +42,44 @@ title('magnitude')
 
 % -------------------------------------------------------------------------
 % Phase
-p = subplot(2,3,2);
+if iscplx
+p = subplot(nrow,ncol,sub2ind([ncol nrow],2,1));
 h = imagesc(angle(rho1)); colorbar
 caxis(p, [-pi pi]);
 colormap(h.Parent, utils.color.phasemap(128));
 daspect(h.Parent, vs);
 axis off
 title('phase')
+end
 
 % -------------------------------------------------------------------------
 % Real
-p = subplot(2,3,4);
+if iscplx
+p = subplot(nrow,ncol,sub2ind([ncol nrow],1,2));
 h = imagesc(real(rho1));
 caxis(p, gather([min(real(rho1(:))) max(real(rho1(:)))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
 axis off
 title('real')
+end
 
 % -------------------------------------------------------------------------
 % Imag
-p = subplot(2,3,5);
+if iscplx
+p = subplot(nrow,ncol,sub2ind([ncol nrow],2,2));
 h = imagesc(imag(rho1));
 caxis(p, gather([min(imag(rho1(:))) max(imag(rho1(:)))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
 axis off
 title('imag')
+end
 
 % -------------------------------------------------------------------------
 % Covariance
 C = utils.invPD(A);
-p = subplot(2,3,3);
+p = subplot(nrow,ncol,sub2ind([ncol nrow],2+iscplx,1));
 h = imagesc(C); colorbar
 caxis(p, gather([min(C(:)) max(C(:))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
@@ -78,7 +89,7 @@ title('covariance')
 % -------------------------------------------------------------------------
 % Log-likelihood
 if ~isempty(ll)
-    subplot(2,3,6)
+    p = subplot(nrow,ncol,sub2ind([ncol nrow],2+iscplx,2));
     cla reset
     if size(ll,1) == 2
         yyaxis right

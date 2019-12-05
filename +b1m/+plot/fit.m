@@ -1,30 +1,37 @@
 function fit(n, x, s, rho, msk, senslog, vs, figname, movie, it)
-% FORMAT b1m.plot.fit(n, x, s, rho, (vs), (figname))
+% FORMAT b1m.plot.fit(n, coils, sens, meanim, [...])
+% n       - Coil index
+% coils   - Coil images
+% sens    - Sensitivities
+% meanim  - Mean image
+% msk     - Undersampling mask                          [none]
+% senslog - Log-encoded sensitivities                   [false]
+% vs      - Voxel size                                  [1 1 1]
+% figname - Name of the figure                          ['Multicoil fit']
+% movie   - Save figure as a movie in provided file     ['']
+% it      - Iteration number                            [NaN]
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
 % -------------------------------------------------------------------------
 % Default parameters
-if nargin < 10
+if nargin < 10 || ~isfinite(it)
     it = NaN;
-    if nargin < 9
-        movie = '';
-        if nargin < 8
-            figname = sprintf('Multicoil fit');
-            if nargin < 7
-                vs = [1 1 1];
-                if nargin < 6
-                    senslog = false;
-                    if nargin < 5
-                        msk = 1;
-                    end
-                end
-            end
-        end
-    end
 end
-if isempty(figname)
+if nargin < 9
+    movie = '';
+end
+if nargin < 8 || isempty(figname)
     figname = sprintf('Multicoil fit');
+end
+if nargin < 7 || isempty(vs)
+    vs = [1 1 1];
+end
+if nargin < 6 || isempty(senslog) || ~isfinite(senslog)
+    senslog = false;
+end
+if nargin < 5 || ~isfinite(msk)
+    msk = [];
 end
 
 % -------------------------------------------------------------------------
@@ -50,43 +57,60 @@ x1   = double(x(:,:,z,n));
 
 % -------------------------------------------------------------------------
 % Build images
-truefit   = s1.*rho1;
-foldedfit = b1m.adjoint_forward(truefit,msk);
-res       = x1 - foldedfit;
+hasmask = ~(isempty(msk) || (isscalar(msk) && msk));
+truefit = s1.*rho1;
+if ~hasmask
+    res       = x1 - truefit;
+    obsfit    = [truefit x1];
+    obsfitres = [truefit x1 res];
+else
+    foldedfit = b1m.adjoint_forward(truefit,msk);
+    res       = x1 - foldedfit;
+    obsfit    = [truefit foldedfit x1];
+    obsfitres = [foldedfit x1 res];
+end
 
-obsfit    = [truefit foldedfit x1];
-obsfitres = [foldedfit x1 res];
-
+iscplx = ~isreal(x);
+ncol   = 1 + iscplx;
+nrow   = 3;
 
 % -------------------------------------------------------------------------
 % Magnitude
-p = subplot(3,2,1);
+p = subplot(nrow,ncol,sub2ind([ncol nrow],1,1));
 h = imagesc(abs(obsfit));
 caxis(p, gather([0 max(abs(obsfit(:)))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
 axis off
 colorbar
-strtitle = sprintf('magnitude (fit | folded | obs) %d', n);
+if hasmask, strtitle = sprintf('magnitude (fit | folded | obs) %d', n);
+else,       strtitle = sprintf('magnitude (fit | obs) %d', n); end
 if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
 title(strtitle)
 
 % -------------------------------------------------------------------------
 % Phase
-p = subplot(3,2,2);
+if iscplx
+p = subplot(nrow,ncol,sub2ind([ncol nrow],2,1));
 h = imagesc(angle(obsfit));
 caxis(p, [-pi pi]);
 colormap(h.Parent, utils.color.phasemap(128));
 daspect(h.Parent, vs);
 axis off
 colorbar
-strtitle = sprintf('phase (fit | folded | obs) %d', n);
+if hasmask, strtitle = sprintf('phase (fit | folded | obs) %d', n);
+else,       strtitle = sprintf('phase (fit | obs) %d', n); end
 if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
 title(strtitle)
+end
 
 % -------------------------------------------------------------------------
 % Sensitivity: magnitude
-p = subplot(3,4,5);
+if iscplx
+    p = subplot(nrow,2*ncol,sub2ind([2*ncol nrow],1,2));
+else
+    p = subplot(nrow,ncol,sub2ind([ncol nrow],1,2));
+end
 h = imagesc(exp(real(z1)));
 cmax = gather(max(abs(s1(:))));
 if cmax > 0
@@ -102,7 +126,8 @@ title(strtitle)
 
 % -------------------------------------------------------------------------
 % Sensitivity: real
-p = subplot(3,4,6);
+if iscplx
+p = subplot(nrow,2*ncol,sub2ind([2*ncol nrow],2,2));
 h = imagesc(real(s1));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
@@ -111,10 +136,12 @@ colorbar
 strtitle = sprintf('real (sens) %d', n);
 if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
 title(strtitle)
+end
 
 % -------------------------------------------------------------------------
 % Sensitivity: imag
-p = subplot(3,4,7);
+if iscplx
+p = subplot(nrow,2*ncol,sub2ind([2*ncol nrow],3,2));
 h = imagesc(imag(s1));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
@@ -123,10 +150,12 @@ colorbar
 strtitle = sprintf('imag (sens) %d', n);
 if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
 title(strtitle)
+end
 
 % -------------------------------------------------------------------------
 % Sensitivity: phase
-p = subplot(3,4,8);
+if iscplx
+p = subplot(nrow,2*ncol,sub2ind([2*ncol nrow],4,2));
 h = imagesc(imag(z1));
 caxis(p, [-pi pi]);
 colormap(h.Parent, hsv(1024));
@@ -136,32 +165,35 @@ colorbar
 strtitle = sprintf('phase (sens) %d', n);
 if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
 title(strtitle)
+end
 
 % -------------------------------------------------------------------------
 % Real
-p = subplot(3,2,5);
+p = subplot(nrow,ncol,sub2ind([ncol nrow],1,3));
 h = imagesc(real(obsfitres));
 caxis(p, gather([min(real(obsfitres(:))) max(real(obsfitres(:)))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
 axis off
 colorbar
-strtitle = sprintf('real (folded | obs | res) %d', n);
+strtitle = sprintf('real (fit | obs | res) %d', n);
 if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
 title(strtitle)
 
 % -------------------------------------------------------------------------
-% Real
-p = subplot(3,2,6);
+% Imag
+if iscplx
+p = subplot(nrow,ncol,sub2ind([ncol nrow],2,3));
 h = imagesc(imag(obsfitres));
 caxis(p, gather([min(imag(obsfitres(:))) max(imag(obsfitres(:)))+eps]));
 colormap(h.Parent, utils.color.viridis(128));
 daspect(h.Parent, vs);
 axis off
 colorbar
-strtitle = sprintf('imaginary (folded | obs | res) %d', n);
+strtitle = sprintf('imaginary (fit | obs | res) %d', n);
 if isfinite(it), strtitle = [strtitle sprintf(' [%02d]', it)]; end
 title(strtitle)
+end
 
 drawnow
 
