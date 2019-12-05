@@ -94,13 +94,6 @@ end
 vs = utils.pad(double(vs), [0 3-numel(vs)], 'replicate', 'post');
 
 % -------------------------------------------------------------------------
-% GPU
-% -------------------------------------------------------------------------
-gpu_on = isa(prec, 'gpuArray');
-if gpu_on, loadarray = @utils.loadarray_gpu;
-else,      loadarray = @utils.loadarray_cpu; end
-
-% -------------------------------------------------------------------------
 % Regularisation structure
 % -------------------------------------------------------------------------
 if reg > 0
@@ -128,8 +121,8 @@ end
 % -------------------------------------------------------------------------
 % Allocate gradient and Hessian
 % -------------------------------------------------------------------------
-g   = zeros([lat 2],'like',loadarray(single(1)));       % Gradient
-H   = zeros([lat 1],'like',loadarray(single(1)));                 % Hessian
+g   = zeros([lat 2],'single');                 % Gradient
+H   = zeros([lat 1],'single');                 % Hessian
 llm = 0;                                       % Conditional log-likelihood
 
 % -------------------------------------------------------------------------
@@ -142,28 +135,28 @@ else
 end
 
 % -------------------------------------------------------------------------
+% Missing data
+% -------------------------------------------------------------------------
+missing = any(isnan(coils(:)));
+
+% -------------------------------------------------------------------------
 % Compute conditional part (slice-wise to save memory)
 % -------------------------------------------------------------------------
 for z=1:lat(3)
     
     % ---------------------------------------------------------------------
     % Load one slice of the complete coil dataset
-    xz = loadarray(coils(:,:,z,:), @single);
+    xz = single(coils(:,:,z,:));
     xz = reshape(xz, [], Nc);
-
-    % ---------------------------------------------------------------------
-    % Compute map of missing data in observed domain
-    cz = utils.gmm.lib('obs2code', xz);
-    code_list = unique(cz)';
     
     % ---------------------------------------------------------------------
     % Load one slice of the (previous) mean
-    rz = loadarray(meanim(:,:,z,:), @single);
+    rz = single(meanim(:,:,z,:));
     rz = reshape(rz, [], 1);
 
     % ---------------------------------------------------------------------
     % Load one slice of the complete sensitivity dataset + correct
-    sz = loadarray(sens(:,:,z,:), @single);
+    sz = single(sens(:,:,z,:));
     sz = reshape(sz, [], Nc);
     if senslog, sz = exp(sz); end
     mz = bsxfun(@times, rz, sz);
@@ -173,49 +166,59 @@ for z=1:lat(3)
     pmz = b1m.adjoint_forward(reshape(mz, [lat(1:2) 1 Nc]), mask);
     pmz = reshape(pmz, [], Nc);
     
+    if missing
     % ---------------------------------------------------------------------
     % Missing data in observed domain
-    gz = zeros(size(xz,1), 1, 'single');
-    Hz = zeros(size(xz,1), 1, 'single');
-    for code=code_list
+        cz = utils.gmm.lib('obs2code', xz);
+        code_list = unique(cz)';
+        gz = zeros(size(xz,1), 1, 'single');
+        Hz = zeros(size(xz,1), 1, 'single');
+        for code=code_list
     
-        sub = cz == code;
-        bin  = utils.gmm.lib('code2bin', code, Nc);
-        if ~any(bin)
-            continue
+            sub = cz == code;
+            bin  = utils.gmm.lib('code2bin', code, Nc);
+            if ~any(bin)
+                continue
+            end
+            % -------------------------------------------------------------
+            % Extract sub + precompute
+            A    = utils.invPD(prec);
+            A    = A(bin,bin);
+            A    = utils.invPD(A);
+            mzs  = mz(sub,bin);
+            xzs  = xz(sub,bin) * A;
+            pmzs = pmz(sub,bin) * A;
+            szs  = sz(sub,bin);
+            % -------------------------------------------------------------
+            % Compute Hessian
+            Hz(sub) = hfactor * Nvox * real(dot(szs, szs*A, 2));
+            % -------------------------------------------------------------
+            % Compute co-gradient
+            gz(sub) = Nvox * dot(szs, pmzs, 2);
+            % -------------------------------------------------------------
+            % Compute log-likelihood
+            llm = llm + double(real(mzs(:)' * pmzs(:)) - 2*real(mzs(:)' * xzs(:)));
         end
-        A = utils.invPD(prec);
-        A = A(bin,bin);
-        A = utils.invPD(A);
-        
+    else
         % -----------------------------------------------------------------
-        % Extract sub + precompute
-        mzs  = mz(sub,bin)*A;
-        xzs  = xz(sub,bin);
-        pzs  = pmz(sub,bin) - xzs;
-        szs  = sz(sub,bin);
-        szsA = szs*A;
-        
-        % -----------------------------------------------------------------
-        % Compute log-likelihood
-        % llm = llm + sum(double(real(dot(mz(sub,bin),(pmz(sub,bin)-2*xz(sub,bin))*A,2))));
-        llm = llm + real(reshape(mzs, [], 1)' * reshape(pzs, [], 1) ...
-                       - reshape(xzs, [], 1)' * reshape(mzs, [], 1));
-        
+        % Precompute
+        xz  = xz * prec;
+        pmz = pmz * prec;
         % -----------------------------------------------------------------
         % Compute Hessian
-        Hz(sub) = hfactor * Nvox * real(dot(szsA, szs, 2));
-
+        Hz = hfactor * Nvox * real(dot(sz, sz*prec, 2));
         % -----------------------------------------------------------------
         % Compute co-gradient
-        gz(sub) = Nvox * dot(szsA, pzs, 2);
-
+        gz = Nvox * dot(sz, pmz - xz, 2);
+        % -----------------------------------------------------------------
+        % Compute log-likelihood
+        llm = llm + double(real(mz(:)' * pmz(:)) - 2*real(mz(:)' * xz(:)));
     end
-    
+        
     % ---------------------------------------------------------------------
     % Background mask
     if ~isempty(bgmask)
-        bgz = loadarray(bgmask(:,:,z), @logical);
+        bgz = bgmask(:,:,z);
         bgz = reshape(bgz, [], 1);
         gz(bgz) = 0;
         Hz(bgz) = 0;
@@ -273,8 +276,8 @@ clear g H
 % -------------------------------------------------------------------------
 if reg
     Ldrho = spm_field('vel2mom', dmean, [vs reg*prm]);
-    llp_part1 = double(reshape(mean0, 1, [])) * double(reshape(Ldrho, [], 1));
-    llp_part2 = double(reshape(dmean, 1, [])) * double(reshape(Ldrho, [], 1));
+    llp_part1 = double(mean0(:)' * Ldrho(:));
+    llp_part2 = double(dmean(:)' * Ldrho(:));
     clear Lds
 else
     llp_part1 = 0;
@@ -313,23 +316,18 @@ for ls=1:6
     
         % -----------------------------------------------------------------
         % Load one slice of the complete coil dataset
-        xz = loadarray(coils(:,:,z,:), @single);
+        xz = single(coils(:,:,z,:));
         xz = reshape(xz, [], Nc);
-
-        % -----------------------------------------------------------------
-        % Compute map of missing data in observed domain
-        cz = utils.gmm.lib('obs2code', xz);
-        code_list = unique(cz)';
     
         % -----------------------------------------------------------------
         % Load one slice of the (previous) mean
-        rz = loadarray(meanim(:,:,z,:), @single);
+        rz = single(meanim(:,:,z,:));
         rz = reshape(rz, [], 1);
         rz = rz - armijo*reshape(double(dmean(:,:,z,:)), [], 1);
 
         % -----------------------------------------------------------------
         % Load one slice of the complete sensitivity dataset + correct
-        sz = loadarray(sens(:,:,z,:), @single);
+        sz = single(sens(:,:,z,:));
         sz = reshape(sz, [], Nc);
         if senslog, sz = exp(sz); end
         mz = bsxfun(@times, rz, sz);
@@ -341,30 +339,36 @@ for ls=1:6
 
         % -----------------------------------------------------------------
         % Missing data in observed domain
-        for code=code_list
+        if missing
+            cz = utils.gmm.lib('obs2code', xz);
+            code_list = unique(cz)';
+            for code=code_list
 
-            sub = cz == code;
-            bin  = utils.gmm.lib('code2bin', code, Nc);
-            if ~any(bin)
-                continue
+                sub = cz == code;
+                bin  = utils.gmm.lib('code2bin', code, Nc);
+                if ~any(bin)
+                    continue
+                end
+                % ---------------------------------------------------------
+                % Extract sub + precompute
+                A    = utils.invPD(prec);
+                A    = A(bin,bin);
+                A    = utils.invPD(A);
+                mzs  = mz(sub,bin);
+                xzs  = xz(sub,bin) * A;
+                pmzs = pmz(sub,bin) * A;
+                % ---------------------------------------------------------
+                % Compute log-likelihood
+                llm = llm + double(real(mzs(:)' * pmzs(:)) - 2*real(mzs(:)' * xzs(:)));
             end
-            A = utils.invPD(prec);
-            A = A(bin,bin);
-            A = utils.invPD(A);
-
+        else
             % -------------------------------------------------------------
-            % Extract sub + precompute
-            mzs  = mz(sub,bin)*A;
-            xzs  = xz(sub,bin);
-            pzs  = pmz(sub,bin) - xzs;
-        
+            % Precompute
+            xz  = xz * prec;
+            pmz = pmz * prec;
             % -------------------------------------------------------------
             % Compute log-likelihood
-            % llm = llm + sum(double(real(dot(mz(sub,bin),(pmz(sub,bin)-2*xz(sub,bin))*A,2))));
-            llm = llm + real(reshape(mzs, [], 1)' * reshape(pzs, [], 1) ...
-                           - reshape(xzs, [], 1)' * reshape(mzs, [], 1));
-            
-
+            llm = llm + double(real(mz(:)' * pmz(:)) - 2*real(mz(:)' * xz(:)));
         end
 
     end
@@ -409,10 +413,5 @@ end
 % =========================================================================
 
 if ok
-    if ~isa(meanim, 'gpuArray')
-        dmean = gather(dmean);
-    end
     meanim(:,:,:) = meanim(:,:,:) - armijo * dmean;
-end
-
 end

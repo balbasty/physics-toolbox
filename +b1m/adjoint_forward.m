@@ -13,8 +13,11 @@ function x = adjoint_forward(x, msk, dirs, dom)
 
 if nargin < 4
     dom = {'im' 'im'};
+    samedom = true;
+else
+    samedom = strcmpi(dom{1},dom{2});
 end
-if isempty(msk) && strcmpi(dom{1},dom{2})
+if isempty(msk) && samedom
     return
 end
 if nargin < 3 || isempty(dirs)

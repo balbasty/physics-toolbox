@@ -42,7 +42,7 @@ function [sens,llm,llp,ok,ls] = sensitivity(varargin)
 % Regularisation structure
 prm = [0 0 1];              % Bending energy
 spm_field('boundary', 1);   % Neumann boundary conditions
-fmg = [2 2];
+fmg = [2 2];                % Full multigrid parameters
 
 % -------------------------------------------------------------------------
 % Number of coils
@@ -82,6 +82,8 @@ llp         = p.Results.LLPrior;
 mask        = p.Results.SamplingMask;
 bgmask      = p.Results.BackgroundMask;
 
+iscplx      = ~isreal(coils);
+
 % -------------------------------------------------------------------------
 % Store dimensions
 dim  = [size(coils) 1 1 1];
@@ -95,31 +97,22 @@ Nz   = lat(3);              % Frequency readout
 
 % -------------------------------------------------------------------------
 % Coils to process: default = all + ensure row-vector
-if isempty(all_n)
-    all_n = 1:Nc;
-end
+if isempty(all_n), all_n = 1:Nc; end
 
 % -------------------------------------------------------------------------
 % Precision: default = identity
-if numel(prec) == 1
-    prec = prec * eye(Nc);
-end
+if numel(prec) == 1, prec = prec * eye(Nc); end
 diagprec = isdiag(prec);
 
 % -------------------------------------------------------------------------
 % Coil factor: copy value for all coils if needed
 reg = utils.pad(reg, [Nc-size(reg,1) 2-size(reg,2)], 'replicate', 'post');
-llp = utils.pad(llp, [Nc-size(llp,1) 2-size(llp,2)], 'replicate', 'post');
+llp = utils.pad(llp, [Nc-size(llp,1) 0], 'replicate', 'post');
+llp = utils.pad(llp, [0 2-size(llp,2)], 0, 'post');
 
 % -------------------------------------------------------------------------
 % Voxel size: ensure row vector + complete
 vs = utils.pad(vs, [0 3-numel(vs)], 'replicate', 'post');
-
-% -------------------------------------------------------------------------
-% GPU
-gpu_on = isa(prec, 'gpuArray');
-if gpu_on, loadarray = @utils.loadarray_gpu;
-else,      loadarray = @utils.loadarray_cpu; end
 
 % -------------------------------------------------------------------------
 % Hessian (hopefully) majorising factor: sampling proportion
@@ -139,62 +132,57 @@ end
 % Prepare stuff to save time in the loop
 function llm = computellm(n,ds)
     if diagprec
-        load_n = n;
+        subload_n = n;
     else
-        load_n = 1:Nc;
+        subload_n = 1:size(coils,4);
     end
-    A1  = prec(load_n,load_n);
-    Nc1 = numel(load_n);
+    A11  = prec(subload_n,subload_n);
+    Nx11 = size(coils,1);
+    Ny11 = size(coils,2);
+    Nz11 = size(coils,3);
+    Nc11 = numel(subload_n);
+    Nvox11 = Nx11*Ny11*Nz11;
     llm = 0;
     % ---------------------------------------------------------------------
     % Compute log-likelihood slice-wise to save memory
-    for z=1:Nz
+    for zz=1:Nz11
 
         % -----------------------------------------------------------------
         % Load one slice of the complete coil dataset
-        xz = loadarray(coils(:,:,z,load_n), @single);
-        xz = reshape(xz, [], numel(load_n));
+        xzz = single(coils(:,:,zz,subload_n));
+        xzz = reshape(xzz, [], numel(subload_n));
+        xzz = xzz * A11;
 
         % -----------------------------------------------------------------
         % Load one slice of the mean
-        rz = loadarray(meanim(:,:,z,:), @single);
-        rz = reshape(rz, [], 1);
+        rzz = single(meanim(:,:,zz,:));
+        rzz = reshape(rzz, [], 1);
 
         % -----------------------------------------------------------------
         % Load one slice of the delta sensitivity
-        dsz = loadarray(ds(:,:,z,:), @single);
-        dsz = reshape(dsz, [], 1);
+        dszz = single(ds(:,:,zz,:));
+        dszz = reshape(dszz, [], 1);
         
         % -----------------------------------------------------------------
         % Load one slice of the complete double dataset + correct
-        sz = loadarray(sens(:,:,z,load_n), @single);
-        sz = reshape(sz, [], Nc1);
-        if diagprec
-            sz = sz - dsz;
-        else
-            sz(:,n) = sz(:,n) - dsz;
-        end
-        dsz = [];
-        if senslog
-            sz = exp(sz);
-        end
-        mz  = bsxfun(@times, rz, sz);
+        szz = single(sens(:,:,zz,subload_n));
+        szz = reshape(szz, [], Nc11);
+        if diagprec, szz      = szz      - dszz;
+        else,        szz(:,n) = szz(:,n) - dszz; end
+        if senslog, szz = exp(szz); end
+        mzz = bsxfun(@times, rzz, szz);
 
         % -----------------------------------------------------------------
         % If incomplete sampling: push+pull coil-specific means
-        pmz = b1m.adjoint_forward(reshape(mz, [Nx Ny 1 Nc1]),mask);
-        pmz = reshape(pmz, [], Nc1);
+        pmzz = b1m.adjoint_forward(reshape(mzz, [Nx11 Ny11 1 Nc11]),mask);
+        pmzz = reshape(pmzz, [], Nc11);
+        pmzz = pmzz * A11;
         
         % -----------------------------------------------------------------
         % Compute log-likelihood
-        llm = llm + sum(double(real(conj(reshape(mz,[],1)).*reshape(pmz*A1,[],1))), 'omitnan', 'double') ...
-                  - 2*sum(double(real(conj(reshape(mz,[],1)).*reshape(xz*A1,[],1))), 'omitnan', 'double');
-        
-        mz  = [];
-        pmz = [];
-        xz  = [];
+        llm = llm + double(real(mzz(:)' * pmzz(:)) - 2*real(mzz(:)' * xzz(:)));
     end % < loop z
-    llm = -0.5 * Nvox * llm;
+    llm = -0.5 * Nvox11 * llm;
 end % < function computellm
 
 
@@ -225,8 +213,8 @@ for n=all_n
     
     % ---------------------------------------------------------------------
     % Allocate conjugate gradient and Hessian
-    g   = zeros([lat 2], 'like', loadarray(single(1)));
-    H   = zeros(lat, 'like', loadarray(single(1)));
+    g   = zeros([lat (1+iscplx)], 'single');
+    H   = zeros(lat, 'single');
     llm(n) = 0;
     
     % ---------------------------------------------------------------------
@@ -235,36 +223,35 @@ for n=all_n
         
         % -----------------------------------------------------------------
         % Load one slice of the complete coil dataset
-        xz = loadarray(coils(:,:,z,load_n), @single);
+        xz = single(coils(:,:,z,load_n));
         xz = reshape(xz, [], numel(load_n));
+        xz = xz * A1;
 
         % -----------------------------------------------------------------
         % Load one slice of the mean
-        rz = loadarray(meanim(:,:,z,:), @single);
+        rz = single(meanim(:,:,z,:));
         rz = reshape(rz, [], 1);
 
         % -----------------------------------------------------------------
         % Load one slice of the complete sensitivity dataset + correct
-        sz = loadarray(sens(:,:,z,load_n), @single);
+        sz = single(sens(:,:,z,load_n));
         sz = reshape(sz, [], Nc1);
-        if senslog
-            sz = exp(sz);
-        end
+        if senslog, sz = exp(sz); end
         mz = bsxfun(@times, rz, sz);
         
         % -----------------------------------------------------------------
         % If incomplete sampling: push+pull coil-specific means
         pmz = b1m.adjoint_forward(reshape(mz, [Nx Ny 1 Nc1]), mask);
         pmz = reshape(pmz, [], Nc1);
+        pmz = pmz * A1;
         
         % -----------------------------------------------------------------
         % Compute log-likelihood
-        llm(n) = llm(n) + sum(double(real(conj(reshape(mz,[],1)).*reshape(pmz*A1,[],1))), 'omitnan', 'double') ...
-                        - 2*sum(double(real(conj(reshape(mz,[],1)).*reshape(xz*A1,[],1))), 'omitnan', 'double');
+        llm(n) = llm + double(real(mz(:)' * pmz(:)) - 2*real(mz(:)' * xz(:)));
         
         % -----------------------------------------------------------------
         % Compute gradient
-        gz = (pmz - xz) * A1;
+        gz = pmz - xz;
         if senslog
             if diagprec, gz = Nvox * conj(mz) .* gz;
             else,        gz = Nvox * conj(mz(:,n)) .* gz(:,n); end
@@ -290,7 +277,7 @@ for n=all_n
         % -----------------------------------------------------------------
         % Background
         if ~isempty(bgmask)
-            bgz = loadarray(bgmask(:,:,z), @logical);
+            bgz = bgmask(:,:,z);
             bgz = reshape(bgz, [], 1);
             gz(bgz) = 0;
             Hz(bgz) = 0;
@@ -298,9 +285,9 @@ for n=all_n
         
         % -----------------------------------------------------------------
         % Store slice
-        gz = cat(2, real(gz), imag(gz));
-        g(:,:,z,:)  = reshape(gz, Nx, Ny, 1, []);
-        H(:,:,z)    = reshape(Hz, Nx, Ny, 1);
+        if iscplx, gz = cat(2, real(gz), imag(gz)); end
+        g(:,:,z,:) = reshape(gz, Nx, Ny, 1, []);
+        H(:,:,z)   = reshape(Hz, Nx, Ny, 1);
         
     end % < loop z
     clear sz xz rz mz pmz gz Hz
@@ -311,11 +298,6 @@ for n=all_n
     %                      COMPUTE GAUSS-NEWTON STEP
     %
     % =====================================================================
-    
-    % ---------------------------------------------------------------------
-    % Gather gradient & Hessian (if on GPU)
-    g = gather(g);
-    H = gather(H);
 
     % ---------------------------------------------------------------------
     % Gradient: add prior term
@@ -326,21 +308,23 @@ for n=all_n
     if reg(n,1) > 0
         g(:,:,:,1) = g(:,:,:,1) + spm_field('vel2mom', s0r, [vs prm], reg(n,1));
     end
-    if reg(n,2) > 0
+    if iscplx && reg(n,2) > 0
         g(:,:,:,2) = g(:,:,:,2) + spm_field('vel2mom', s0i, [vs prm], reg(n,2));
     end
     
     % ---------------------------------------------------------------------
     % Gauss-Newton
     if reg(n,1) > 0
-        dsr = spm_field(H, g(:,:,:,1), [vs prm fmg], reg(n,1));
+        ds = spm_field(H, g(:,:,:,1), [vs prm fmg], reg(n,1));
     else
-        dsr = g(:,:,:,1)./max(H,eps('single'));
+        ds = g(:,:,:,1)./max(H,eps('single'));
     end
-    if reg(n,2) > 0
-        dsi = spm_field(H, g(:,:,:,2), [vs prm fmg], reg(n,2));
-    else
-        dsi = g(:,:,:,2)./max(H,eps('single'));
+    if iscplx
+        if reg(n,2) > 0
+            dsi = spm_field(H, g(:,:,:,2), [vs prm fmg], reg(n,2));
+        else
+            dsi = g(:,:,:,2)./max(H,eps('single'));
+        end
     end
     clear g H 
 
@@ -351,22 +335,22 @@ for n=all_n
     llpi_part1 = 0;
     llpi_part2 = 0;
     if reg(n,1) > 0
-        Lds = spm_field('vel2mom', dsr, [vs prm], reg(n,1));
-        llpr_part1 = sum(s0r(:) .* Lds(:), 'double');
-        llpr_part2 = sum(dsr(:) .* Lds(:), 'double');
+        Lds = spm_field('vel2mom', ds, [vs prm], reg(n,1));
+        llpr_part1 = double(s0r(:)' * Lds(:));
+        llpr_part2 = double(ds(:)' * Lds(:));
         clear s0r Lds
     end
-    if reg(n,2) > 0
+    if iscplx && reg(n,2) > 0
         Lds = spm_field('vel2mom', dsi, [vs prm], reg(n,2));
-        llpi_part1 = sum(reshape(s0i, 1, []) .* reshape(Lds, [], 1), 'double');
-        llpi_part2 = sum(reshape(dsi, 1, []) .* reshape(Lds, [], 1), 'double');
+        llpi_part1 = double(s0i(:)' * Lds(:));
+        llpi_part2 = double(dsi(:)' * Lds(:));
         clear s0i Lds
     end
     
     % ---------------------------------------------------------------------
     % Convert to complex
-    ds = complex(dsr,dsi);
-    clear dsr
+    if iscplx, ds = complex(ds,dsi); clear dsi; end
+    
     
     % =====================================================================
     %
@@ -389,10 +373,12 @@ for n=all_n
             llp(n,1) = -0.5 * (armijo^2 * llpr_part2 - 2 * armijo * llpr_part1);
             llp(n,1) = llp0(1) + llp(n,1);
         end
-        llp(n,2) = 0;
-        if reg(n,2)
-            llp(n,2) = -0.5 * (armijo^2 * llpi_part2 - 2 * armijo * llpi_part1);
-            llp(n,2) = llp0(2) + llp(n,2);
+        if iscplx
+            llp(n,2) = 0;
+            if reg(n,2)
+                llp(n,2) = -0.5 * (armijo^2 * llpi_part2 - 2 * armijo * llpi_part1);
+                llp(n,2) = llp0(2) + llp(n,2);
+            end
         end
 
         % -----------------------------------------------------------------
