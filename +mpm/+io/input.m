@@ -48,13 +48,13 @@ function in = input(varargin)
 % ------
 % in{v}
 %   .type       (PDw,T1w,MTw,B1+,B1-)
-%   .seq        (SPGR,BS,...)
+%   .seq        (SGE,BS,...)
 %   .dim        (volume dimensions)
 %   .mat0       (original voxel-to-world matrix)
 %   .mat        (registered voxel-to-world matrix)
 %   .trf        (transformation matrix)
 %   .nii(f)     (nifti file[s]) 
-%   [if SPGR]
+%   [if SGE]
 %   .field      (field strength in Tesla)
 %   .FA         (nominal flip angle in radian)
 %   .TR         (repetition time in second)
@@ -65,6 +65,8 @@ function in = input(varargin)
 %       .mean   (mean tissue intensity)
 %       .var    (noise variance)
 %       .dat    (file_array OR array [if 'load'])
+
+% TODO: guessing parameters is implemented in a very adhoc manner
 
 % -------------------------------------------------------------------------
 % Check load/map option
@@ -196,7 +198,7 @@ for v=1:V
                     vol.echoes{n}.mean = mu;
                 end
                 if ~isfield(vol.echoes{n}, 'var')
-                    vol.echoes{n}.var = s;
+                    vol.echoes{n}.var = s^2;
                 end
             end
             smean = smean + log(vol.echoes{n}.var);
