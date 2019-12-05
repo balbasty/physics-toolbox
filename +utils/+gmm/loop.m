@@ -128,7 +128,7 @@ if iscell(C)
     clear codes
 end
 if Missing && isempty(C) && any(any(isnan(X)))
-    C = spm_gmm_lib('obs2code', X);
+    C = utils.gmm.lib('obs2code', X);
     L = unique(C);
 end
 if ~iscell(cluster) || numel(cluster) < 2
@@ -219,10 +219,10 @@ end
 
 % -------------------------------------------------------------------------
 % logpX (needed to initialise Z)
-if Missing, const = spm_gmm_lib('Const', mean, prec, L);
-else,       const = spm_gmm_lib('Const', mean, prec);
+if Missing, const = utils.gmm.lib('Const', mean, prec, L);
+else,       const = utils.gmm.lib('Const', mean, prec);
 end
-logpX = spm_gmm_lib('Marginal', X, [{MU} prec], const, {C,L}, BinUncertainty);
+logpX = utils.gmm.lib('Marginal', X, [{MU} prec], const, {C,L}, BinUncertainty);
 
 % -------------------------------------------------------------------------
 % EM loop
@@ -231,13 +231,13 @@ for em=1:IterMax
     
     % ---------------------------------------------------------------------
     % Compute responsibilities
-    Z = spm_gmm_lib('Responsibility', logpX, logPI);
+    Z = utils.gmm.lib('Responsibility', logpX, logPI);
     clear logpX
     
     % ---------------------------------------------------------------------
     % Compute sufficient statistics (bin uncertainty part)
     if sum(BinUncertainty) > 0
-    	SS2b = spm_gmm_lib('SuffStat', 'bin', BinUncertainty, Z, W, {C,L});
+    	SS2b = utils.gmm.lib('SuffStat', 'bin', BinUncertainty, Z, W, {C,L});
     else
         SS2b = 0;
     end
@@ -253,12 +253,12 @@ for em=1:IterMax
         % Compute fast sufficient statistics:
         % > sum{E[z]}, sum{E[z]*g}, sum{E[z]*gg'}
         %   for each configuration of missing data
-        [lSS0,lSS1,lSS2] = spm_gmm_lib('SuffStat', 'base', X, Z, W, {C,L});
+        [lSS0,lSS1,lSS2] = utils.gmm.lib('SuffStat', 'base', X, Z, W, {C,L});
         
         % -----------------------------------------------------------------
         % Initialise objective function
-        [LMU,LA]    = spm_gmm_lib('KL', 'GaussWishart', {MU,b}, prec, {MU0,b0}, {V0,n0});
-        [LX,const] = spm_gmm_lib('MarginalSum', lSS0, lSS1, lSS2, mean, prec, L, SS2b);
+        [LMU,LA]    = utils.gmm.lib('KL', 'GaussWishart', {MU,b}, prec, {MU0,b0}, {V0,n0});
+        [LX,const] = utils.gmm.lib('MarginalSum', lSS0, lSS1, lSS2, mean, prec, L, SS2b);
         LB          = NaN(1,SubIterMax);
         LB(1)       = LMU + LA + LX;
         for i=1:SubIterMax
@@ -274,12 +274,12 @@ for em=1:IterMax
             % -------------------------------------------------------------
             % Infer missing suffstat
             % sum{E[z]}, sum{E[z*x]}, sum{E[z*xx']}
-            [SS0,SS1,SS2] = spm_gmm_lib('SuffStat', 'infer', lSS0, lSS1, lSS2, {MU,A}, L);
+            [SS0,SS1,SS2] = utils.gmm.lib('SuffStat', 'infer', lSS0, lSS1, lSS2, {MU,A}, L);
             SS2 = SS2 + SS2b;
 
             % -------------------------------------------------------------
             % Update GMM
-            [MU,A,b,V,n] = spm_gmm_lib('UpdateClusters', ...
+            [MU,A,b,V,n] = utils.gmm.lib('UpdateClusters', ...
                                           SS0, SS1, SS2, {MU0,b0,V0,n0});
             for k=1:size(MU,2)
                 [~,cholp] = chol(A(:,:,k));
@@ -297,8 +297,8 @@ for em=1:IterMax
             
             % -------------------------------------------------------------
             % Marginal / Objective function
-            [LMU,LA]    = spm_gmm_lib('KL', 'GaussWishart', {MU,b}, prec, {MU0,b0}, {V0,n0});
-            [LX,const] = spm_gmm_lib('MarginalSum', lSS0, lSS1, lSS2, mean, prec, L, SS2b);
+            [LMU,LA]    = utils.gmm.lib('KL', 'GaussWishart', {MU,b}, prec, {MU0,b0}, {V0,n0});
+            [LX,const] = utils.gmm.lib('MarginalSum', lSS0, lSS1, lSS2, mean, prec, L, SS2b);
             LB(i+1)    = LMU+LA+LX;
             subgain    = (LB(i+1)-LB(i))/(max(LB(2:i+1), [], 'omitnan')-min(LB(2:i+1), [], 'omitnan'));
             % -------------------------------------------------------------
@@ -317,8 +317,8 @@ for em=1:IterMax
                 if ~sum(n), prec = {A};
                 else,       prec = {V,n};   end
                 subgain    = 0;
-                [LMU,LA]    = spm_gmm_lib('KL', 'GaussWishart', {MU,b}, prec, {MU0,b0}, {V0,n0});
-                [LX,const] = spm_gmm_lib('MarginalSum', lSS0, lSS1, lSS2, mean, prec, L, SS2b);
+                [LMU,LA]    = utils.gmm.lib('KL', 'GaussWishart', {MU,b}, prec, {MU0,b0}, {V0,n0});
+                [LX,const] = utils.gmm.lib('MarginalSum', lSS0, lSS1, lSS2, mean, prec, L, SS2b);
             end
             % -------------------------------------------------------------
             % Print stuff
@@ -342,12 +342,12 @@ for em=1:IterMax
     
         % -----------------------------------------------------------------
         % Compute sufficient statistics
-        [SS0,SS1,SS2] = spm_gmm_lib('SuffStat', X, Z, W);
+        [SS0,SS1,SS2] = utils.gmm.lib('SuffStat', X, Z, W);
         SS2 = SS2 + SS2b;
         
         % -------------------------------------------------------------
         % Update GMM
-        [MU,A,b,V,n] = spm_gmm_lib('UpdateClusters', ...
+        [MU,A,b,V,n] = utils.gmm.lib('UpdateClusters', ...
                                    SS0, SS1, SS2, {MU0,b0,V0,n0});
         for k=1:size(MU,2)
             [~,cholp] = chol(A(:,:,k));
@@ -361,32 +361,32 @@ for em=1:IterMax
         mean = {MU,b};
         if ~sum(n), prec =  {A};
         else,       prec = {V,n};   end
-        const = spm_gmm_lib('const', mean, prec, L);
+        const = utils.gmm.lib('const', mean, prec, L);
         
     end
                  
     % ---------------------------------------------------------------------
     % Update Proportions
     if size(PI,1) == 1
-        [PI,logPI,a] = spm_gmm_lib('UpdateProportions', SS0, a0);
+        [PI,logPI,a] = utils.gmm.lib('UpdateProportions', SS0, a0);
     end        
 
     % ---------------------------------------------------------------------
     % Plot GMM
     if Verbose(1) >= 3
-        spm_gmm_lib('Plot', 'GMM', {X,W}, {MU,A}, PI);
+        utils.gmm.lib('Plot', 'GMM', {X,W}, {MU,A}, PI);
     end
    
     % ---------------------------------------------------------------------
     % Marginal / Objective function
-    logpX = spm_gmm_lib('Marginal', X, [{MU} prec], const, {C,L}, BinUncertainty);
+    logpX = utils.gmm.lib('Marginal', X, [{MU} prec], const, {C,L}, BinUncertainty);
     
     % ---------------------------------------------------------------------
     % Compute lower bound
-    lb.P(end+1) = spm_gmm_lib('KL', 'Dirichlet', a, a0);
-    lb.Z(end+1) = spm_gmm_lib('KL', 'Categorical', Z, W, logPI);
+    lb.P(end+1) = utils.gmm.lib('KL', 'Dirichlet', a, a0);
+    lb.Z(end+1) = utils.gmm.lib('KL', 'Categorical', Z, W, logPI);
     if ~Missing
-        [lb.MU(end+1),lb.A(end+1)] = spm_gmm_lib('KL', 'GaussWishart', ...
+        [lb.MU(end+1),lb.A(end+1)] = utils.gmm.lib('KL', 'GaussWishart', ...
             {MU,b}, prec, {MU0,b0}, {V0,n0});
         lb.X(end+1) = sum(sum(bsxfun(@times, logpX, bsxfun(@times, Z, W)),'omitnan'),'omitnan');
     else
@@ -437,7 +437,7 @@ end
 gain = (lb.sum(end) - lb.sum(end-1))/(max(lb.sum(:), [], 'omitnan')-min(lb.sum(:), [], 'omitnan'));
 if verbose >= 1
     if verbose >= 2
-        spm_gmm_lib('plot', 'LB', lb)
+        utils.gmm.lib('plot', 'LB', lb)
     end
     switch sign(gain)
         case  1,    incr = '(+)';
