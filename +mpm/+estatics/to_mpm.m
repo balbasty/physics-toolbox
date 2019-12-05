@@ -8,10 +8,10 @@ function out = to_mpm(estatics, pre, coreg)
 % coreg    - Coregister pre-computed B1 maps with estatics maps [true]
 % out      - Output structure with fields: A, R1, [MT]
 
-if nargin < 4
+if nargin < 3
     coreg = true;
 end
-if nargin < 3 || isempty(pre)
+if nargin < 2 || isempty(pre)
     pre = struct;
 end
 
