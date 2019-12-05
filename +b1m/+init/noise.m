@@ -54,24 +54,15 @@ for n=1:Nc
     
     % ---------------------------------------------------------------------
     % Fit Rician mixture
-    [PI,NU,SIG] = spm_rice_mixture(double(wn), double(xn), 2);
-    if NU(1) == 0 && NU(2) == 0
+    [~,~,SIG] = spm_rice_mixture(double(wn), double(xn), 2);
+    SIG = min(SIG);
+    if SIG == 0
         % If failed, fit Gaussian mixture
-        [~,MU,A,PI] = utils.gmm.fit(double(xn), 2, double(wn),...
+        [~,~,A] = utils.gmm.fit(double(xn), 2, double(wn),...
             'GaussPrior', {[],10,[],10},'BinWidth',bwn);
         C(n,n) = 1./max(A);
-%         if MU(1) <= MU(2)
-%             C(n,n) = 1./A(1);
-%         else
-%             C(n,n) = 1./A(2);
-%         end
     else
-        C(n,n) = min(SIG).^2;
-%         if NU(1) <= NU(2)
-%             C(n,n) = SIG(1)^2;
-%         else
-%             C(n,n) = SIG(2)^2;
-%         end
+        C(n,n) = SIG.^2;
     end
     
 end
