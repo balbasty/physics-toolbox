@@ -2,11 +2,21 @@ function scales = compute_scales(nbscales,dim,mat,sub)
 % Create a structure of parameters for processing data in a multi-scale 
 % manner.
 %
-% FORMAT scales = mpm.compute_scales(nbscales, dim, mat, sub)
+% FORMAT scales = mpm.compute_scales(nbscales, dim, [mat], [sub])
 % nbscales - Number of scale levels
 % dim      - Volume dimension at the finer level
-% mat      - Voxel-to-world matrix at the finer level
-% sub      - Subsampling to apply at the finer level
+% mat      - Voxel-to-world matrix at the finer level [eye(4)]
+% sub      - Subsampling to apply at the finer level  [Inf]
+% scales   - Structure array with `nbscales` elements, and fields:
+%            . scl - Scaling factor             [2^(i-1)]
+%            . dim - Dimensions of the lattice  [~ dim0/scl(i)]
+%            . mat - Voxel-to-world matrix      [~ mat0/scl(i)]
+%            . vs  - Voxel size                 [~ vs0/scl(i)]
+%            . sub - Subsampling                [~ vs(i)/2]
+%            . ff  - Fudge factor               [1]
+
+if nargin < 4, sub = Inf;    end
+if nargin < 3, mat = eye(4); end
 
 dim = dim(:)';
 
@@ -26,6 +36,4 @@ for i=2:nbscales
         scales(i).sub = mean(scales(i).vs)/2;
     end
     scales(i).ff = 1; % scales(i-1).ff * 2;
-end
-
 end
