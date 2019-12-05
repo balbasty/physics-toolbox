@@ -88,7 +88,7 @@ opt.reg.mode = cell2mat(cellfun(@(x) reg0.mode.(x), opt.parameters(:), 'UniformO
 opt.reg.prec = cell2mat(cellfun(@(x) reg0.prec.(x), opt.parameters(:), 'UniformOutput', false));
 opt.reg.mean = cellfun(@(x) reg0.mean.(x), opt.parameters(:));
 % --- estimate mean parameter value
-opt.verbose > 0 && fprintf('Guess mean parameter value\n');
+if opt.verbose > 0, fprintf('Guess mean parameter value\n'); end
 mu = mpm.estatics.to_mpm_mini(mpm.estatics.loglin.fit.mini(in));
 fields = fieldnames(mu);
 for k=1:numel(fields)
@@ -113,9 +113,10 @@ for k=1:numel(opt.reg.mean)
         otherwise
             expval = exp(opt.reg.mean(k));
     end
-    opt.verbose > 0 ...
-    && fprintf('* Param %-6s | mean (log): %8.3g | mean (exp): %8.3g | prec (abs): %6.3g | prec (mem): %6.3g\n', ...
-               opt.parameters{k}, opt.reg.mean(k), expval, opt.reg.prec(k,1), opt.reg.prec(k,2));
+    if opt.verbose > 0
+        fprintf('* Param %-6s | mean (log): %8.3g | mean (exp): %8.3g | prec (abs): %6.3g | prec (mem): %6.3g\n', ...
+                opt.parameters{k}, opt.reg.mean(k), expval, opt.reg.prec(k,1), opt.reg.prec(k,2));
+    end
 end
 
 % -------------------------------------------------------------------------
@@ -129,7 +130,7 @@ end
 % -------------------------------------------------------------------------
 % Prepare output
 % -------------------------------------------------------------------------
-opt.verbose > 0 && fprintf('Prepare output data structure\n');
+if opt.verbose > 0, fprintf('Prepare output data structure\n'); end
 % --- Field of view
 dim = zeros(3,0);
 mat = zeros(4, 4, 0);
@@ -159,7 +160,7 @@ end
 out = mpm.io.output(prefix, dim, mat, value, 'single', opt.out);
 
 % -------------------------------------------------------------------------
-% Initialise with loglinear fit
+% Initialise
 % -------------------------------------------------------------------------
 switch lower(opt.init)
     case 'mean'
@@ -171,12 +172,12 @@ switch lower(opt.init)
     otherwise
         error('Initialisation mode ''%s'' not implemented.', init);
 end
-opt.verbose > 1 && mpm.nonlin.plot.progress(out,[]);
+if opt.verbose > 1, mpm.nonlin.plot.progress(out,[]); end
 
 % -------------------------------------------------------------------------
 % Nonlinear fit
 % -------------------------------------------------------------------------
-opt.verbose > 0 && fprintf('Full nonlinear fit\n');
+if opt.verbose > 0, fprintf('Full nonlinear fit\n'); end
 ll  = [];
 scl = [];
 opt.reg.prec0 = opt.reg.prec;
@@ -185,23 +186,25 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     % Get scale specific parameters
     % ---------------------------------------------------------------------
-    opt.verbose > 0 && fprintf('Scale %i\n', s);
+    if opt.verbose > 0, fprintf('Scale %i\n', s); end
     dim = scales(s).dim;
     % vs  = scales(s).vs;
     vs  = sqrt(sum(scales(s).mat(1:3,1:3).^2));
     sub = scales(s).sub;
-    ff  = scales(s).ff;
-    opt.reg.prec = ff * opt.reg.prec0 * prod(vs);
+    ff  = 10^(s-1); % scales(s).ff;
+    opt.reg.prec = opt.reg.prec0 * prod(vs);
+    opt.reg.prec(opt.reg.mode == 2) = ff * opt.reg.prec(opt.reg.mode == 2);
+    opt.reg.prec(opt.reg.mode == 1) = sqrt(ff) * opt.reg.prec(opt.reg.mode == 1);
     
     % ---------------------------------------------------------------------
     % A bit of ad-hoc fudging for L2 regularisation
     % ---------------------------------------------------------------------
-    opt.reg.prec(opt.reg.mode(:,2)==2,2) = opt.reg.prec(opt.reg.mode(:,2)==2,2) * power(10,s-1);
+    % opt.reg.prec(opt.reg.mode(:,2)==2,2) = opt.reg.prec(opt.reg.mode(:,2)==2,2) * power(10,s-1);
     
     it0 = numel(ll)+1;
     for it=1:(opt.nbiter+s)
     
-        opt.verbose > 0 && fprintf('Iteration %i\n', it);
+        if opt.verbose > 0, fprintf('Iteration %i\n', it); end
 
         % -----------------------------------------------------------------
         % Update maps
@@ -214,9 +217,9 @@ for s=numel(scales):-1:1
 
         % -----------------------------------------------------------------
         % Loop over volumes
-        opt.verbose > 0 && fprintf('Gradient: data ');
+        if opt.verbose > 0, fprintf('Gradient: data '); end
         for v=1:numel(in)
-            opt.verbose > 0 && fprintf('%d',v);
+            if opt.verbose > 0, fprintf('%d',v); end
 
             % - Compute gradient
             subopt = struct('subsample', sub, 'verbose', opt.verbose);
@@ -226,14 +229,14 @@ for s=numel(scales):-1:1
             g   = g   + g1; clear g1
             H   = H   + H1; clear H1
             
-            opt.verbose > 0 && fprintf(' ');
+            if opt.verbose > 0, fprintf(' '); end
         end
-        opt.verbose > 0 && fprintf('\n');
+        if opt.verbose > 0, fprintf('\n'); end
 
         % -----------------------------------------------------------------
         % Gradient: Absolute
         if any(opt.reg.mode(:,1) > 0)
-            opt.verbose > 0 && fprintf('Gradient: absolute ');
+            if opt.verbose > 0, fprintf('Gradient: absolute '); end
             for k=1:nbparameters
                 if opt.reg.mode(k,1) == 2
                     fprintf('.');
@@ -244,13 +247,13 @@ for s=numel(scales):-1:1
                     clear y
                 end
             end
-            opt.verbose > 0 && fprintf('\n');
+            if opt.verbose > 0, fprintf('\n'); end
         end
 
         % -----------------------------------------------------------------
         % Gradient: Membrane
         if any(opt.reg.mode(:,2) > 0)
-            opt.verbose > 0 && fprintf('Gradient: membrane ');
+            if opt.verbose > 0, fprintf('Gradient: membrane '); end
             w    = 0;
             wnew = 0;
             if any(opt.reg.mode(:,2) == 1), w = 1./single(out.W.dat()); end
@@ -273,7 +276,7 @@ for s=numel(scales):-1:1
                         clear y Ly
                 end
             end
-            opt.verbose > 0 && fprintf('\n');
+            if opt.verbose > 0, fprintf('\n'); end
             if any(opt.reg.mode(:,2) == 1)
                 if ischar(opt.reg.uncertainty) && strcmpi(opt.reg.uncertainty, 'bayes')
                     wnew = sqrt(wnew + sum(single(out.U.dat()), 4));
@@ -287,7 +290,7 @@ for s=numel(scales):-1:1
         % -----------------------------------------------------------------
         % Update MTV weights
         if any(opt.reg.mode(:,2)==1)
-            opt.verbose > 0 && fprintf('Update: MTV weights\n');
+            if opt.verbose > 0, fprintf('Update: MTV weights\n'); end
             out.W.dat(:,:,:) = wnew; clear Wnew
         end
 
@@ -319,15 +322,10 @@ for s=numel(scales):-1:1
         end
         clear H g W
         % - Update
-        opt.verbose > 0 && fprintf('Update: maps\n');
+        if opt.verbose > 0, fprintf('Update: maps\n'); end
         for k=1:nbparameters
             prm = opt.parameters{k};
-            switch prm
-                case 'R2s'
-                    out.(prm).dat(:,:,:) = max(0, out.(prm).dat(:,:,:) - dy(:,:,:,k));
-                otherwise
-                    out.(prm).dat(:,:,:) = out.(prm).dat(:,:,:) - dy(:,:,:,k);
-            end
+            out.(prm).dat(:,:,:) = out.(prm).dat(:,:,:) - opt.armijo * dy(:,:,:,k);
         end
         clear dy
 
@@ -341,10 +339,12 @@ for s=numel(scales):-1:1
 
         % -----------------------------------------------------------------
         % Plot
-        opt.verbose > 1 && mpm.nonlin.plot.progress(out,ll,scl);
-        opt.verbose > 0 && fprintf('%s\n', repmat('-',[1 80]));
-        opt.verbose > 0 && fprintf('ll = %7.3g | llx = %7.3g | lly = %7.3g | gain = %7.3g\n', ll(end), llx, lly, gain);
-        opt.verbose > 0 && fprintf('%s\n', repmat('-',[1 80]));
+        if opt.verbose > 0
+            if opt.verbose > 1, mpm.nonlin.plot.progress(out,ll,scl); end
+            fprintf('%s\n', repmat('-',[1 80]));
+            fprintf('ll = %7.3g | llx = %7.3g | lly = %7.3g | gain = %7.3g\n', ll(end), llx, lly, gain);
+            fprintf('%s\n', repmat('-',[1 80]));
+        end
        
         % -----------------------------------------------------------------
         % Out?
@@ -359,7 +359,8 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     if s ~= 1
         out = mpm.resize_output(out, scales(s-1).dim);
-        opt.verbose > 1 && mpm.nonlin.plot.progress(out,ll,scl);
+        if opt.verbose > 1, mpm.nonlin.plot.progress(out,ll,scl); end
+        % opt.armijo = opt.armijo/2;
     end
     
 end
