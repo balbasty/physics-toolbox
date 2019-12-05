@@ -87,7 +87,7 @@ p.addParameter('SensOptim',         true,        @utils.isboolean);
 p.addParameter('MeanOptim',         true,        @utils.isboolean);
 p.addParameter('SensLog',           false,       @utils.isboolean);
 p.addParameter('precOptim',         false,       @utils.isboolean);
-p.addParameter('Parallel',          Inf,         @utils.isboolean);
+p.addParameter('Threads',           Inf,         @utils.isboolean);
 p.addParameter('Tolerance',         1E-3,        @(X) isnumeric(X) && isscalar(X));
 p.addParameter('IterMax',           15,          @utils.isintval);
 p.addParameter('IterMin',           15,          @utils.isintval);
@@ -126,13 +126,20 @@ llm             = p.Results.LLCond;
 lls             = p.Results.LLSens;
 llr             = p.Results.LLMean;
 ll              = p.Results.LLPrev;
-Nw              = p.Results.Parallel;
+nbthreads       = p.Results.Threads;
 mask            = p.Results.SamplingMask;
 maskbg          = p.Results.MaskBackground;
 
 if precoptim
     warning('variance inference is deactivated for now.')
 end
+
+% -------------------------------------------------------------------------
+% Use multithreaded SPM
+% -------------------------------------------------------------------------
+nbthreads0 = utils.threads.get();
+if ~isfinite(nbthreads), nbthreads = -1; end
+utils.threads.set(nbthreads);
 
 % -------------------------------------------------------------------------
 % Time execution
@@ -157,25 +164,15 @@ Nvox = Nx*Ny*Nz;
 % -------------------------------------------------------------------------
 mask = logical(mask);
 if isscalar(mask)
-    if mask
-        mask = logical([]);
-    else
-        error('The sampling mask is full of zeros')
-    end
+    if mask, mask = logical([]);
+    else,    error('It seems that the sampling mask is full of zeros.'); end
 end
-if ~isempty(mask)
-    propmask = sum(mask(:))/numel(mask);
-else
-    propmask = 1;
-end
+if ~isempty(mask), propmask = sum(mask(:))/numel(mask);
+else,              propmask = 1; end
 acceleration = 1/propmask;
 if acceleration > 1
-    if ~isfinite(meaniter)
-        meaniter = ceil(acceleration);
-    end
-    if ~isfinite(meaniter0)
-        meaniter0 = 2*ceil(acceleration);
-    end
+    if ~isfinite(meaniter),  meaniter = ceil(acceleration);    end
+    if ~isfinite(meaniter0), meaniter0 = 2*ceil(acceleration); end
 else
     meaniter  = 1;
     meaniter0 = 1;
@@ -200,7 +197,7 @@ meanfactor = meanfactor * voxvol;
 % -------------------------------------------------------------------------
 % Coil factor
 % -------------------------------------------------------------------------
-sensfactor = utils.pad(double(sensfactor), [Nc-size(sensfactor,1) 2-size(sensfactor,2)], 'replicate', 'post');
+sensfactor = utils.pad(sensfactor, [Nc-size(sensfactor,1) 2-size(sensfactor,2)], 'replicate', 'post');
 
 % -------------------------------------------------------------------------
 % Correct mean image regularisation
@@ -220,22 +217,18 @@ meanfactor = meanfactor / meanval^2;
 % -------------------------------------------------------------------------
 % Decreasing regularisation
 % -------------------------------------------------------------------------
-sensdecfactor0      = sensdecfactor;
-sensdecfactor       = linspace(sensdecfactor0, 0, iterdec-1)';
-if isempty(sensdecfactor)
-    sensdecfactor = 0;
-end
-sensdecfactor       = 10.^sensdecfactor;
-sensfactorfinal     = sensfactor;
-sensfactor          = sensdecfactor(1) * sensfactorfinal; 
-meandecfactor0      = meandecfactor;
-meandecfactor       = linspace(meandecfactor0, 0, iterdec-1)';
-if isempty(meandecfactor)
-    meandecfactor = 0;
-end
-meandecfactor       = 10.^meandecfactor;
-meanfactorfinal     = meanfactor;
-meanfactor          = meandecfactor(1) * meanfactorfinal; 
+sensdecfactor0  = sensdecfactor;
+sensdecfactor   = linspace(sensdecfactor0, 0, iterdec-1)';
+if isempty(sensdecfactor), sensdecfactor = 0; end
+sensdecfactor   = 10.^sensdecfactor;
+sensfactorfinal = sensfactor;
+sensfactor      = sensdecfactor(1) * sensfactorfinal; 
+meandecfactor0  = meandecfactor;
+meandecfactor   = linspace(meandecfactor0, 0, iterdec-1)';
+if isempty(meandecfactor), meandecfactor = 0; end
+meandecfactor   = 10.^meandecfactor;
+meanfactorfinal = meanfactor;
+meanfactor      = meandecfactor(1) * meanfactorfinal; 
 
 % -------------------------------------------------------------------------
 % Allocate mean
@@ -243,18 +236,14 @@ meanfactor          = meandecfactor(1) * meanfactorfinal;
 meaninit = isempty(meanim) || (acceleration > 1);
 if isempty(meanim)
     meanim = zeros(Nx, Ny, Nz, 1, Nct, 'like', coils(1));
-    if isnan(llr)
-        llr = 0;
-    end
+    if isnan(llr), llr = 0; end
 end
 if isempty(sens)
     sensinitmag   = true;
     sensinitphase = true;
     sensinit      = true;
     sens = ones(Nx, Ny, Nz, Nc, 'like', coils(1));
-    if isnan(lls)
-        lls = 0;
-    end
+    if isnan(lls), lls = 0; end
 else
     sensinitmag   = false;
     sensinitphase = false;
@@ -264,12 +253,6 @@ else
         meaninit      = true;
     end
 end
-
-% -------------------------------------------------------------------------
-% Parallel processing
-% -------------------------------------------------------------------------
-if isnan(Nw),     Nw = 0; end
-if ~isfinite(Nw), Nw = parcluster('local'); Nw = Nw.NumWorkers; end
 
 % -------------------------------------------------------------------------
 % Print parameters
@@ -338,8 +321,8 @@ if isempty(prec) || any(any(isnan(prec)))
     prec = prec / Nac;
     clear ac Nac
 end
-logdetnoise = utils.logdetPD(prec);
-
+logdetnoise = utils.logdetPD(prec) * (1 - 0.5 * isreal(coils));
+logdetnoise = logdetnoise * propmask * Nvox;
 
 % -------------------------------------------------------------------------
 % Compute mask of the background
@@ -395,7 +378,7 @@ if meanoptim && meaninit
             'SensLog',       senslog,        ...
             'BackgroundMask',maskbg,         ...
             'SamplingMask',  mask);
-        llm = llm + propmask*Nvox*logdetnoise;
+        llm = llm + logdetnoise;
         if verbose > 0
             if ok, fprintf(' :D (%d)\n', ls);
             else,  fprintf(' :(\n');
@@ -461,7 +444,7 @@ if sensoptim && sensinit % (sensinitmag || sensinitphase)
                 'SensLog',       senslog,        ...
                 'BackgroundMask',maskbg,         ...
                 'SamplingMask',  mask);
-            llm = llm + propmask*Nvox*logdetnoise;
+            llm = llm + logdetnoise;
             if verbose > 0
                 if ok, fprintf(' :D (%d)\n', ls);
                 else,  fprintf(' :(\n');
@@ -472,8 +455,8 @@ if sensoptim && sensinit % (sensinitmag || sensinitphase)
                 b1m.plot.mean(meanim, prec, ll, vs);
             end
         end
+    end
 end
-
 
 
 % -------------------------------------------------------------------------
@@ -487,7 +470,7 @@ end
 if isnan(llm)
     % > Initial log-likelihood (cond term)
     llm = b1m.ll.conditional(coils,sens,meanim,prec,mask,senslog) ...
-        + propmask*Nvox*logdetnoise;
+        + logdetnoise;
 end
 if isnan(llr)
     % > Initial log-likelihood (mean prior term)
@@ -575,48 +558,25 @@ for it=1:itermax
             llm  = zeros(Nc,1);
             Ad   = diag(prec);
 
-            if verbose < 3
-                % We can parallelise :D
-                parfor(n=1:Nc, double(Nw))
-                    [sens(:,:,:,n),llm(n),lls(n,:),ok,ls] = b1m.update.sensitivity(...
-                        meanim, coils(:,:,:,n), sens(:,:,:,n),  ...
-                        'Precision',     Ad(n),                 ...
-                        'RegFactor',     sensfactor(n,:),       ...
-                        'VoxelSize',     vs,                    ...
-                        'Log',           senslog,               ...
-                        'LLPrior',       lls0(n,:),             ...
-                        'SamplingMask',  mask);
-                    if verbose > 0
-                        if ok, fprintf(' [%2d :D (%d)]', n, ls);
-                        else,  fprintf(' [%2d :(    ]', n);
-                        end
-                    end
+            for n=1:Nc
+                if verbose > 2
+                    b1m.plot.fit(n, coils, sens, meanim, mask, senslog, vs);
                 end
-            else
-                % We cannot parallelise :(
-                for n=1:Nc
-                    if verbose > 0
-                        if verbose > 2
-                            b1m.plot.fit(n, coils, sens, meanim, mask, senslog, vs);
-                        end
-                        if mod(n,4) == 1, fprintf('\n  | '); end
-                        fprintf('%2d', n);
+                [sens(:,:,:,n),llm(n),lls(n,:),ok,ls] = b1m.update.sensitivity(...
+                    meanim, coils(:,:,:,n), sens(:,:,:,n),  ...
+                    'Precision',     Ad(n),                 ...
+                    'RegFactor',     sensfactor(n,:),       ...
+                    'VoxelSize',     vs,                    ...
+                    'Log',           senslog,               ...
+                    'LLPrior',       lls0(n,:),             ...
+                    'SamplingMask',  mask);
+                if verbose > 0
+                    if mod(n-1,8) == 0, fprintf('\n'); end
+                    if ok, fprintf(' [%2d :D (%d)]', n, ls);
+                    else,  fprintf(' [%2d :(    ]', n);
                     end
-                    [sens(:,:,:,n),llm(n),lls(n,:),ok,ls] = b1m.update.sensitivity(...
-                        meanim, coils(:,:,:,n), sens(:,:,:,n),  ...
-                        'Precision',     Ad(n),                 ...
-                        'RegFactor',     sensfactor(n,:),       ...
-                        'VoxelSize',     vs,                    ...
-                        'Log',           senslog,               ...
-                        'LLPrior',       lls0(n,:),             ...
-                        'SamplingMask',  mask);
-                    if verbose > 0
-                        if ok, fprintf(' :D (%d) | ', ls);
-                        else,  fprintf(' :(     | ');
-                        end
-                        if verbose > 2
-                            b1m.plot.fit(n, coils, sens, meanim, mask, senslog, vs);
-                        end
+                    if verbose > 2
+                        b1m.plot.fit(n, coils, sens, meanim, mask, senslog, vs);
                     end
                 end
             end
@@ -658,11 +618,9 @@ for it=1:itermax
         end
         if verbose > 0, fprintf('\n'); end
         % Add normalisation term
-        llm = llm + propmask*Nvox*logdetnoise;
+        llm = llm + logdetnoise;
         ll  = [ll (sum(llm)+sum(lls(:))+llr)];
-        if verbose > 1
-            b1m.plot.mean(meanim, prec, ll, vs);
-        end
+        if verbose > 1, b1m.plot.mean(meanim, prec, ll, vs); end
     end
     
     % ---------------------------------------------------------------------
@@ -670,9 +628,7 @@ for it=1:itermax
     % ---------------------------------------------------------------------
     if senslog
         [sens,meanim] = b1m.centre(sens, meanim, sensfactor);
-        if verbose > 1
-            b1m.plot.mean(meanim, prec, ll, vs);
-        end
+        if verbose > 1, b1m.plot.mean(meanim, prec, ll, vs); end
     end
     
     % ---------------------------------------------------------------------
@@ -690,16 +646,14 @@ for it=1:itermax
                 'SensLog',       senslog,        ...
                 'BackgroundMask',maskbg,         ...
                 'SamplingMask',  mask);
-            llm = llm + propmask*Nvox*logdetnoise;
+            llm = llm + logdetnoise;
             if verbose > 0
                 if ok, fprintf(' :D (%d) |', ls);
                 else,  fprintf(' :(     |');
                 end
             end
             ll = [ll (sum(llm)+sum(lls(:))+llr)];
-            if verbose > 1
-                b1m.plot.mean(meanim, prec, ll, vs);
-            end
+            if verbose > 1, b1m.plot.mean(meanim, prec, ll, vs); end
        end
        if verbose > 0, fprintf('\n'); end
     end
@@ -756,4 +710,4 @@ if verbose > -1
     fprintf('Processing finished: in %s\n', utils.sec2ydhms(stop));
 end
 
-end % < function multicoil_infer
+utils.threads.set(nbthreads0);
