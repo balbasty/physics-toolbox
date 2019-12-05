@@ -83,38 +83,15 @@ function f = progress(out,ll,scl,figname)
     % ---------------------------------------------------------------------
     % Uncertainty
     if isfield(out, 'U')
-        subplot(nrow,ncol,i);
-        imagesc(out.U.dat(:,:,z,1));
-        colormap('gray');
-        colorbar;
-        axis off
-        title('Uncertainty PDw');
-        i = i+1;
-        
-        subplot(nrow,ncol,i);
-        imagesc(out.U.dat(:,:,z,2));
-        colormap('gray');
-        colorbar;
-        axis off
-        title('Uncertainty T1w');
-        i = i+1;
-        
-        subplot(nrow,ncol,i);
-        imagesc(out.U.dat(:,:,z,3));
-        colormap('gray');
-        colorbar;
-        axis off
-        title('Uncertainty MTw');
-        i = i+1;
-        
-        subplot(nrow,ncol,i);
-        imagesc(out.U.dat(:,:,z,4));
-        caxis([0 80]);
-        colormap('gray');
-        colorbar;
-        axis off
-        title('Uncertainty R2^*');
-        i = i+1;
+        for j=1:size(out.U.dat, 4)
+            subplot(nrow,ncol,i);
+            imagesc(out.U.dat(:,:,z,j));
+            colormap('gray');
+            colorbar;
+            axis off
+            title('Uncertainty');
+            i = i+1;
+        end
     end
         
     % ---------------------------------------------------------------------
