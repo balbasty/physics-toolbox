@@ -74,7 +74,7 @@ if isfield(pre, 'B1m')
     b1m = pull(single(B1m.map()), xdim, B1m.mat\xmat); % /norm
     % b1m = log(max(b1m/norm, eps('single')));
 end
-y0 = exp(y0) .* b1m; clear log_b1m
+y0 = exp(y0) .* b1m; clear b1m
 
 % --- True flip angle (x transmit sensitivity)
 b1p = 1;
@@ -86,9 +86,10 @@ if isfield(pre, 'B1p')
     b1p = pull(single(B1p.map()), xdim, B1p.mat\xmat)/norm;
     % b1p = log(max(b1p/norm, eps('single')));
 end
-sina = FA .* b1p; clear log_b1p
-cosa = 1 - 0.5 * sina.^2;
-y0   = y0 .* sina; clear sina
+a    = FA .* b1p; clear b1p
+cosa = cos(a);
+% cosa = 1 - 0.5 * sina.^2;
+y0   = y0 .* sin(a); clear a
 
 % --- T1 exponential decay: exp(-R1*TR)
 TRxR1      = utils.pull(single(out.logR1.dat()), t);
@@ -201,9 +202,9 @@ end
 % -------------------------------------------------------------------------
 % Push gradient and Hessian to model space
 if nargout > 1
-    g = utils.push(g, t, ydim);
+    g = utils.push(factor * g, t, ydim);
     if nargout > 2
-        H = utils.push(H, t, ydim);
+        H = utils.push(factor * H, t, ydim);
     end
 end
 clear t
