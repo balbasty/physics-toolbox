@@ -30,7 +30,7 @@ end
 if nargin < 6 || isempty(senslog) || ~isfinite(senslog)
     senslog = false;
 end
-if nargin < 5 || ~isfinite(msk)
+if nargin < 5
     msk = [];
 end
 
