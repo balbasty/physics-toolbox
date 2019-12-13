@@ -7,7 +7,9 @@ function [llx,g,H] = gradient(prm, in, out, pre, opt)
 % in  - Structure of input (observed) echos (FLASH [+ MT pulse])
 % out - Structure of output (fitted) parameters (A, R1, R2, MT)
 % pre - Structure of pre-computed parameters (B1t, B1r)
-% opt - Structure of options
+% opt - Structure of options with fields:
+%       . subsample - Subsampling distance [0=all]
+%       . verbose   - Verbosity level [0]
 %
 % OUTPUT
 % ------
@@ -15,7 +17,7 @@ function [llx,g,H] = gradient(prm, in, out, pre, opt)
 % g   - Gradient of parameters
 % H   - Hessian of parameters
 
-% TODO: some of this should be done slice-wise. I don't know yet if loading
+% TODO: some of this may be done slice-wise. I don't know yet if loading
 % the current log-maps should be done inside the slice loop, or outside to
 % save some i/o.
 % If done outside the loop, it means holding up to 6+6+10=22 volumes in
@@ -25,7 +27,7 @@ function [llx,g,H] = gradient(prm, in, out, pre, opt)
 
 if nargin < 4 || isempty(pre), pre = struct; end
 if nargin < 5 || isempty(opt), opt = struct; end
-if ~isfield(opt, 'subsample'), opt.subsample = Inf;   end
+if ~isfield(opt, 'subsample'), opt.subsample = 0;     end
 if ~isfield(opt, 'verbose'),   opt.verbose   = 0;     end
 
 % -------------------------------------------------------------------------
@@ -64,17 +66,23 @@ factor = prod(xdim0./xdim);
 t = utils.warps.affine(ymat\xmat, xdim);
 
 % --- Proton density (x receive sensitivity)
-y0 = utils.pull(single(out.logA.dat()), t);
-b1m = 1;
+if isfield(out, 'logA')
+    y0 = exp(utils.pull(single(out.logA.dat()), t));
+    opt.log.A = true;
+else
+    A  = utils.pull(single(out.A.dat()), t);
+    y0 = A;
+    opt.log.A = false;
+end
 if isfield(pre, 'B1m')
     if     isfield(pre.B1m, ct),    B1m = pre.B1m.(ct);
     elseif isfield(pre.B1m, 'all'), B1m = pre.B1m.all;
     else,                           B1m = pre.B1m; end
     if strcmpi(B1m.unit, 'p.u.'), norm = 100; else, norm = 1; end
     b1m = pull(single(B1m.map()), xdim, B1m.mat\xmat); % /norm
-    % b1m = log(max(b1m/norm, eps('single')));
+    y0 = y0 .* b1m;
+    clear b1m
 end
-y0 = exp(y0) .* b1m; clear b1m
 
 % --- True flip angle (x transmit sensitivity)
 b1p = 1;
@@ -84,25 +92,35 @@ if isfield(pre, 'B1p')
     else,                           B1p = pre.B1p; end
     if strcmpi(B1p.unit, 'p.u.'), norm = 100; else, norm = 1; end
     b1p = pull(single(B1p.map()), xdim, B1p.mat\xmat)/norm;
-    % b1p = log(max(b1p/norm, eps('single')));
 end
 a    = FA .* b1p; clear b1p
 cosa = cos(a);
-% cosa = 1 - 0.5 * sina.^2;
 y0   = y0 .* sin(a); clear a
 
 % --- T1 exponential decay: exp(-R1*TR)
-TRxR1      = utils.pull(single(out.logR1.dat()), t);
-TRxR1      = exp(TRxR1) .* TR;
-exp_mTRxR1 = exp(-TRxR1);
+if isfield(out, 'logR1')
+    r1 = exp(utils.pull(single(out.logR1.dat()), t));
+    opt.log.R1 = true;
+    exp_mTRxR1 = exp(-TR * r1);
+else
+    exp_mTRxR1 = utils.pull(single(out.R1.dat()), t);
+    opt.log.R1 = false;
+    exp_mTRxR1 = exp(-TR * exp_mTRxR1);
+end
 
 % --- MT ratio
 if mtw
-    exp_mLogMT = exp(-utils.pull(single(out.logMT.dat()), t));
-    mt = 1./(1 + exp_mLogMT);                  % MTratio
-    one_minus_mt = 1 - mt;              % 1 - MTratio
-    d_one_minus_mt = -exp_mLogMT./(1 + exp_mLogMT).^2; % first derivative
-    clear emt
+    if isfield('logMT')
+        exp_mLogMT     = exp(-utils.pull(single(out.logMT.dat()), t));
+        one_minus_mt   = 1 - 1./(1 + exp_mLogMT);           % 1 - MTratio
+        d_one_minus_mt = -exp_mLogMT./(1 + exp_mLogMT).^2;  % first derivative
+        clear exp_mLogMT
+        opt.log.MT = true;
+    else
+        one_minus_mt   = 1 - utils.pull(single(out.MT.dat()), t);
+        d_one_minus_mt = -1;
+        opt.log.MT = false;
+    end
 end
 
 % --- Signal fit (TE=0)
@@ -113,7 +131,13 @@ else
 end
 
 % --- R2 decay
-r2 = exp(utils.pull(single(out.logR2s.dat()), t));
+if isfield(out, 'logR2s')
+    r2 = exp(utils.pull(single(out.logR2s.dat()), t));
+    opt.log.R2s = true;
+else
+    r2 = utils.pull(single(out.logR2s.dat()), t);
+    opt.log.R2s = false;
+end
 
 % -------------------------------------------------------------------------
 % Allocate gradient/Hessian
@@ -126,17 +150,24 @@ if nargout > 1
         H = zeros([xdim K], 'single');
     end
     % Decide indices
-    iA  = find(strcmpi('logA',   prm));
-    iR1 = find(strcmpi('logR1',  prm));
-    iR2 = find(strcmpi('logR2s', prm));
-    iMT = find(strcmpi('logMT',  prm));
+    if opt.log.A,   iA  = find(strcmpi('logA',   prm));
+    else,           iA  = find(strcmpi('A',      prm)); end
+    if opt.log.R1,  iR1 = find(strcmpi('logR1',  prm));
+    else,           iR1 = find(strcmpi('R1',     prm)); end
+    if opt.log.R2s, iR2 = find(strcmpi('logR2s', prm));
+    else,           iR2 = find(strcmpi('R2s',    prm)); end
+    if mtw
+        if opt.log.MT,  iMT = find(strcmpi('logMT',  prm));
+        else,           iMT = find(strcmpi('MT',     prm)); end
+    end
 end
 for e=1:numel(in.echoes)
-    opt.verbose > 0 && fprintf('.');
+    if opt.verbose > 0, fprintf('.'); end
     % ---------------------------------------------------------------------
     % Compute residuals
     dat     = in.echoes{e}.dat;
-    y       = y0 .* exp(-r2 * in.echoes{e}.TE);       % Echo fit
+    TE      = in.echoes{e}.TE;
+    y       = y0 .* exp(-r2 * TE);                    % Echo fit
     x       = single(dat(1:skip(1):end, ...
                          1:skip(2):end, ...
                          1:skip(3):end));             % Oberved echo
@@ -158,11 +189,15 @@ for e=1:numel(in.echoes)
         % Proton density (A)
         if ~isempty(iA)
             g(:,:,:,iA) = y;
+            if ~opt.log.A
+                g(:,:,:,iA) = g(:,:,:,iA) ./ A;
+            end
         end
         % -----------------------------------------------------------------
         % T2 decay (R2)
         if ~isempty(iR2)
-            g(:,:,:,iR2) = - in.echoes{e}.TE .* r2 .* y;
+            g(:,:,:,iR2) = -TE .* y;
+            if opt.log.R2s, g(:,:,:,iR2) = g(:,:,:,iR2) .* r2; end
         end
         % -----------------------------------------------------------------
         % T1 decay (R1)
@@ -172,11 +207,12 @@ for e=1:numel(in.echoes)
             else
                 g(:,:,:,iR1) = cosa ./ (1 - cosa .* exp_mTRxR1) - 1 ./ (1 - exp_mTRxR1);
             end
-            g(:,:,:,iR1) = -TRxR1 .* exp_mTRxR1 .* y .* g(:,:,:,iR1);
+            g(:,:,:,iR1) = -TR .* exp_mTRxR1 .* y .* g(:,:,:,iR1);
+            if opt.log.R1, g(:,:,:,iR1) = g(:,:,:,iR1) .* r1; end
         end
         % -----------------------------------------------------------------
         % MT ratio (MT)
-        if ~isempty(iMT) && mtw
+        if mtw && ~isempty(iMT)
             g(:,:,:,iMT) = 1 ./ (one_minus_mt .* (1 - one_minus_mt .* cosa .* exp_mTRxR1));
             g(:,:,:,iMT) = d_one_minus_mt .* y .* g(:,:,:,iMT);
         end
