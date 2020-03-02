@@ -60,7 +60,7 @@ function dat = read(fname, varargin)
 
 % TODO:
 % * split [read hard header]/[select subset]/[layout]
-% * allow returning severl subparts (e.g., {'imaging' 'calibration'})
+% * allow returning several subparts (e.g., {'imaging' 'calibration'})
 % * for each subpart, return a struct with fields .dat and .head
 
 % -------------------------------------------------------------------------
