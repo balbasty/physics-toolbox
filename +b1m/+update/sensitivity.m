@@ -3,7 +3,7 @@ function [sens,llm,llp,ok,ls] = sensitivity(varargin)
 % images, a mean image and a noise precision (= inverse covariance) 
 % matrix.
 %
-% FORMAT [sens, ...] = multicoil_sensitivity(mean, coils, sens, ...)
+% FORMAT [sens, ...] = b1m.update.sensitivity(mean, coils, sens, ...)
 %
 % REQUIRED
 % --------

@@ -1,33 +1,35 @@
-function A = noise(coils, gpu)
-% Estimate the noise variance of each coil by fitting a Rice or Gaussian
+function [A,N] = noise(coils, mask)
+% Estimate the noise precision of each coil by fitting a Rice or Gaussian
 % mixture model to their magnitude image.
 %
-% FORMAT prec = b1m.init.noise(coils, (gpu))
+% FORMAT [prec,n] = b1m.init.noise(coils, (mask))
 %
 % coils - (File)Array [Nx Ny Nz Nc] - Complex coil images
-% gpu                               - If 'gpu', compute on GPU
+% mask  - (File)Array [Nx Ny]       - Sampling mask
 %
-% prec  -       Array [Nc Nc]       - Noise precision matrix
+% prec  -       Array [Nc Nc]       - Diagonal noise precision matrix
+% n     -                           - Number of points in image domain
 %
-% >> prec = inv(sum((s*r-x)*(s*r-x)')/(2J)) [where ' = conjugate transpose]
+% This function returns noise precision in the image domain of the
+% fully-sampled centre of k-space. The precision of the noise in k-space is
+% obtained by: prec/n
 %
 % Nc = number of coils
 %__________________________________________________________________________
 % Copyright (C) 2018 Wellcome Centre for Human Neuroimaging
 
-if nargin < 4
-    gpu = '';
+if nargin < 2, mask = logical([]); end
+
+% -------------------------------------------------------------------------
+% Get autocalibration region
+if numel(mask) > 1
+    coils = utils.ifft(utils.acsub(coils, mask), [1 2 3]);
 end
-gpu_on = strcmpi(gpu, 'gpu');
+N = size(coils,1)*size(coils,2)*size(coils,3);
 
 % -------------------------------------------------------------------------
 % Allocate output array
 C = zeros(size(coils,4), 'single');
-if gpu_on
-    C = gpuArray(C);
-end
-if gpu_on, loadarray = @utils.loadarray_gpu;
-else,      loadarray = @utils.loadarray_cpu; end
 
 Nc = size(coils,4);
 ndigits = ceil(log10(Nc))+1;
@@ -39,7 +41,7 @@ for n=1:Nc
     
     % ---------------------------------------------------------------------
     % Load one coil image
-    xn = loadarray(abs(coils(:,:,:,n)), @single);
+    xn = single(abs(coils(:,:,:,n)));
     xn = reshape(xn, [], 1);
     
     % ---------------------------------------------------------------------
@@ -49,7 +51,7 @@ for n=1:Nc
     cn = linspace(xmin,xmax,129);
     cn = (cn(2:end)+cn(1:end-1))/2;
     bwn = (xmax - xmin)/128;
-    [xn,wn] = spm_imbasics('hist', double(xn), cn(:), 'KeepZero', false);
+    [xn,wn] = utils.histN(double(xn), cn(:), 'KeepZero', false);
     clear c1
     
     % ---------------------------------------------------------------------
