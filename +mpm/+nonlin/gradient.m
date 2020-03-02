@@ -101,41 +101,41 @@ y0   = y0 .* sin(a); clear a
 if isfield(out, 'logR1')
     r1 = exp(utils.pull(single(out.logR1.dat()), t));
     opt.log.R1 = true;
-    exp_mTRxR1 = exp(-TR * r1);
+    e1 = exp(-TR * r1);
+    % e1 = -TR * r1; % Linearised version
 else
-    exp_mTRxR1 = utils.pull(single(out.R1.dat()), t);
+    e1 = utils.pull(single(out.R1.dat()), t);
     opt.log.R1 = false;
-    exp_mTRxR1 = exp(-TR * exp_mTRxR1);
+    e1 = exp(-TR * e1);
+    % e1 = -TR * e1; % Linearised version
 end
 
 % --- MT ratio
 if mtw
-    if isfield('logMT')
-        exp_mLogMT     = exp(-utils.pull(single(out.logMT.dat()), t));
-        one_minus_mt   = 1 - 1./(1 + exp_mLogMT);           % 1 - MTratio
-        d_one_minus_mt = -exp_mLogMT./(1 + exp_mLogMT).^2;  % first derivative
-        clear exp_mLogMT
+    if isfield(out, 'logMT')
+        mt   = exp(-utils.pull(single(out.logMT.dat()), t));
+        omt  = 1 - 1./(1 + mt);           % 1 - MTratio
+        domt = -mt .* omt;  % first derivative
+        clear mt
         opt.log.MT = true;
     else
-        one_minus_mt   = 1 - utils.pull(single(out.MT.dat()), t);
-        d_one_minus_mt = -1;
+        omt   = 1 - utils.pull(single(out.MT.dat()), t);
+        domt = -1;
         opt.log.MT = false;
     end
+else
+    omt = 1;
 end
 
 % --- Signal fit (TE=0)
-if mtw
-    y0 = y0 .* one_minus_mt.* (1 - exp_mTRxR1) ./ (1 - cosa .* one_minus_mt .* exp_mTRxR1);
-else
-    y0 = y0 .* (1 - exp_mTRxR1) ./ (1 - cosa .* exp_mTRxR1);
-end
+y0 = y0 .* omt.* (1 - e1) ./ (1 - cosa .* omt .* e1);
 
 % --- R2 decay
 if isfield(out, 'logR2s')
     r2 = exp(utils.pull(single(out.logR2s.dat()), t));
     opt.log.R2s = true;
 else
-    r2 = utils.pull(single(out.logR2s.dat()), t);
+    r2 = utils.pull(single(out.R2s.dat()), t);
     opt.log.R2s = false;
 end
 
@@ -144,7 +144,7 @@ end
 llx = 0;
 F = numel(prm); % Number of features
 if nargout > 1
-    g = zeros([xdim F], 'single');
+    g  = zeros([xdim F], 'single');
     [ind,K] = utils.symIndices(F); % Number of Hessian components
     if nargout > 2
         H = zeros([xdim K], 'single');
@@ -166,7 +166,7 @@ for e=1:numel(in.echoes)
     % ---------------------------------------------------------------------
     % Compute residuals
     dat     = in.echoes{e}.dat;
-    TE      = in.echoes{e}.TE;
+    TE      = in.echoes{e}.TE;                        % Echo time
     y       = y0 .* exp(-r2 * TE);                    % Echo fit
     x       = single(dat(1:skip(1):end, ...
                          1:skip(2):end, ...
@@ -174,7 +174,6 @@ for e=1:numel(in.echoes)
     msk     = isfinite(y) & isfinite(x) & (x > 0);    % Mask of observed voxels
     y(~msk) = 0;
     x(~msk) = 0;
-    clear msk
     r       = y-x;                                    % Residuals
     clear x
 
@@ -185,54 +184,51 @@ for e=1:numel(in.echoes)
     % ---------------------------------------------------------------------
     % Compute gradient and Hessian in observed space
     if nargout > 1
+        g1 = zeros([xdim F], 'single');
         % -----------------------------------------------------------------
         % Proton density (A)
         if ~isempty(iA)
-            g(:,:,:,iA) = y;
+            g1(:,:,:,iA) = y;
             if ~opt.log.A
-                g(:,:,:,iA) = g(:,:,:,iA) ./ A;
+                g1(:,:,:,iA) = g1(:,:,:,iA) ./ A;
             end
         end
         % -----------------------------------------------------------------
-        % T2 decay (R2)
+        % T2* decay (R2*)
         if ~isempty(iR2)
-            g(:,:,:,iR2) = -TE .* y;
-            if opt.log.R2s, g(:,:,:,iR2) = g(:,:,:,iR2) .* r2; end
+            g1(:,:,:,iR2) = -TE .* y;
+            if opt.log.R2s, g1(:,:,:,iR2) = g1(:,:,:,iR2) .* r2; end
         end
         % -----------------------------------------------------------------
         % T1 decay (R1)
         if ~isempty(iR1)
-            if mtw
-                g(:,:,:,iR1) = one_minus_mt .* cosa ./ (1 - one_minus_mt .* cosa .* exp_mTRxR1) - 1 ./ (1 - exp_mTRxR1);
-            else
-                g(:,:,:,iR1) = cosa ./ (1 - cosa .* exp_mTRxR1) - 1 ./ (1 - exp_mTRxR1);
-            end
-            g(:,:,:,iR1) = -TR .* exp_mTRxR1 .* y .* g(:,:,:,iR1);
-            if opt.log.R1, g(:,:,:,iR1) = g(:,:,:,iR1) .* r1; end
+            g1(:,:,:,iR1)  = (omt .* cosa - 1) ./ ((1 - e1) .* (1 - omt .* cosa .* e1));
+            g1(:,:,:,iR1)  = - TR .* e1 .* y .* g1(:,:,:,iR1) ;
+            if opt.log.R1, g1(:,:,:,iR1) = g1(:,:,:,iR1) .* r1; end
         end
         % -----------------------------------------------------------------
-        % MT ratio (MT)
+        % Magnetisation-transfer ratio (MT)
         if mtw && ~isempty(iMT)
-            g(:,:,:,iMT) = 1 ./ (one_minus_mt .* (1 - one_minus_mt .* cosa .* exp_mTRxR1));
-            g(:,:,:,iMT) = d_one_minus_mt .* y .* g(:,:,:,iMT);
+            g1(:,:,:,iMT) = - (1 - omt) ./ (1 - omt .* cosa .* e1);
+            g1(:,:,:,iMT) = y .* g1(:,:,:,iMT);
         end
     end
     if nargout > 2
         % -----------------------------------------------------------------
-        % The expectation of the Hessian is obtained from the gradient
-        % (squared), up to the residuals.
+        % The expectation of the Hessian is obtained from the gradient,
+        % without the residuals.
         for k=1:F
             for kk=k:F
-                H(:,:,:,ind(k,kk)) = lam * g(:,:,:,k) .* g(:,:,:,kk);
+                H(:,:,:,ind(k,kk)) = H(:,:,:,ind(k,kk)) + lam * g1(:,:,:,k) .* g1(:,:,:,kk) .* msk;
             end
         end
     end
     if nargout > 1
         % -----------------------------------------------------------------
         % Multiply gradient with residuals
-        g = lam * bsxfun(@times, g, r);
+        g = g + lam * bsxfun(@times, g1, r);
     end
-    clear r
+    clear r msk
 end
 
 % -------------------------------------------------------------------------
@@ -250,8 +246,8 @@ llx = factor * llx;
 % -------------------------------------------------------------------------
 % Check gradients for MPM nonlinear fit
 % -------------------------------------------------------------------------
-% 
-% syms TE TR sina cosa 'positive'   % Fixed parameters
+ 
+% syms TE TR sina cosa 'positive'   % Fixed parameters (a \in [0 90])
 % syms lR1 lR2 lA ld 'real'         % Optimised parameters (log)
 % syms X 'real'                     % Observation
 % 
@@ -259,16 +255,16 @@ llx = factor * llx;
 % A  = exp(lA);
 % R1 = exp(lR1);
 % R2 = exp(lR2);
-% d  = 1 / (1 + exp(-ld));
-% md = 1 - d;
-% dd = - exp(-ld)./(1 + exp(-ld)).^2; % Derivative of (1-d) w.r.t. ld
-% e1 = exp(-TR*R1);
-% e2 = exp(-TE*R2);
+% d  = 1 / (1 + exp(-ld));        % delta = MT ratio
+% md = 1 - d;                     % 1 - delta
+% dd = - d .* md;                 % Derivative of (1-d) w.r.t. ld
+% e1 = exp(-TR*R1);               % Exponential decay w.r.t. R1
+% e2 = exp(-TE*R2);               % Exponential decay w.r.t. R2
 % 
 % % Signal fit and negative log-likelihood
-% S = A * sina * md * (1 - e1) / (1 - md * cosa * e1) * e2;
-% R = S - X;
-% L = 0.5*R^2;
+% S = A * sina * md * (1 - e1) / (1 - md * cosa * e1) * e2;    % Signal
+% R = S - X;                                                   % Residual
+% L = 0.5*R^2;                                                 % Objective
 % 
 % % Compute gradients automatically
 % g = [diff(L, lA); ...
@@ -279,13 +275,13 @@ llx = factor * llx;
 %      diff(L, lR2, lA) diff(L, lR2, lR2) diff(L, lR2, lR1) diff(L, lR2, ld); ...
 %      diff(L, lR1, lA) diff(L, lR1, lR2) diff(L, lR1, lR1) diff(L, lR1, ld); ...
 %      diff(L, ld,  lA) diff(L, ld,  lR2) diff(L, ld,  lR1) diff(L, ld,  ld)];
-% H = subs(H, X, S);
+% H = subs(H, X, S); % Hessian at optimum -> positive-definite
 % 
 % % Check that our gradients are correct
 % gg = [S; ...
 %       -TE * R2 * S; ...
-%       -TR * R1 * e1 * S * (md * cosa / (1 - md * cosa .* e1) - 1 ./ (1 - e1)); ...
-%       dd * S / (md * (1 - md * cosa * e1))];
+%       -TR * R1 * e1 * S * (md .* cosa - 1) ./ ((1 - e1) .* (1 - md .* cosa .* e1));...
+%       - (1 - md) * S / (1 - md * cosa * e1)];
 % HH = gg * gg.';
 % gg = gg * R;
 % 

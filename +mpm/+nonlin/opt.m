@@ -15,9 +15,9 @@ o = setdefault(o, 'tolerance',        1E-4);      % Gain threshold for early sto
 o = setdefault(o, 'out.folder',       '.');       % Output folder
 o = setdefault(o, 'out.fname',        '.nii');    % Suffix for output files 
 o = setdefault(o, 'out.mem',          'map');     % map/load output volumes
-o = setdefault(o, 'reg.mode.default', [2 1]);     % Absolute/Membrane regul. (0=None|1=L1|2=L2)
-o = setdefault(o, 'reg.prec.default', [1E2 1E2]); % Absolute/Membrane precision
-o = setdefault(o, 'reg.prec.logR2s',  [1E2 1E2]); % Absolute/Membrane precision
+o = setdefault(o, 'reg.mode.default', [2 2]);     % Absolute/Membrane regul. (0=None|1=L1|2=L2)
+o = setdefault(o, 'reg.prec.default', [1E1 1E1]); % Absolute/Membrane precision
+o = setdefault(o, 'reg.prec.logR2s',  [1E1 1E1]); % Absolute/Membrane precision
 o = setdefault(o, 'reg.mean.default', NaN);       % Mean (NaN = from minilogfit)
 o = setdefault(o, 'reg.uncertainty' , 1E-3);      % RLS smoother (value|'bayes')
 o = setdefault(o, 'vs',               NaN);       % Reconstruction voxel size (Nan=from input)
