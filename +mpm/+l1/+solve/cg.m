@@ -1,4 +1,4 @@
-function dy = cg(H, g, w, mode, prec, vs, opt)
+function [dy,info] = cg(H, g, w, mode, prec, vs, opt, dy)
 % Conjugate gradient solver for L1 spatial regularisation.
 %
 % FORMAT d = mpm.l1.solver.cg(H, g, w, mode, prec, vs, [opt])
@@ -15,13 +15,13 @@ function dy = cg(H, g, w, mode, prec, vs, opt)
 %      . precond               - Use preconditioner [true]
 % d    - {nx ny nz nf}         - Step: d = H\g
 
-    if nargin < 7
-        opt = struct;
-    end
+    if nargin < 8, dy   = []; end
+    if nargin < 7, opt  = struct; end
     if ~isfield(opt, 'nbiter'),    opt.nbiter    = 10;    end
     if ~isfield(opt, 'tolerance'), opt.tolerance = 1E-3;  end
     if ~isfield(opt, 'verbose'),   opt.verbose   = true;  end
     if ~isfield(opt, 'precond'),   opt.precond   = true;  end
+    if ~isfield(opt, 'fmginit'),   opt.fmginit   = true;  end
 
     % Neumann boundary conditon
     spm_field('boundary', 1);
@@ -30,8 +30,16 @@ function dy = cg(H, g, w, mode, prec, vs, opt)
     % Initial guess using a majoriser of the true Hessian
     wbnd = double(max(w(:)));
     prec_bound = prec;
-    prec_bound(mode==1) = wbnd * prec_bound(mode==1).^2;
-    dy = spm_field(H, g, [vs 0 1 0 fmg], prec_bound(:)');
+    prec_bound(mode==1) = wbnd * prec_bound(mode==1);
+    start = tic;
+    if isempty(dy)
+        if opt.fmginit
+            dy = spm_field(H, g, [vs 0 1 0 fmg], prec_bound(:)');
+        else
+            dy = zeros(size(g), 'single');
+        end
+    end
+    time_init = toc(start);
     
     if all(w(:)==1)
         % No need for CG
@@ -41,8 +49,8 @@ function dy = cg(H, g, w, mode, prec, vs, opt)
     % Prior term
     function y = prior(x)
         y = zeros(size(x), 'like', x);
-        y(:,:,:,mode==1) = spm_field('vel2mom1', single(x(:,:,:,mode==1)), single(w), [vs   1  ], prec(mode==1).^2);
-        y(:,:,:,mode==2) = spm_field('vel2mom',  single(x(:,:,:,mode==2)),            [vs 0 1 0], prec(mode==2).^2);
+        y(:,:,:,mode==1) = spm_field('vel2mom1', single(x(:,:,:,mode==1)), single(w), [vs   1  ], prec(mode==1));
+        y(:,:,:,mode==2) = spm_field('vel2mom',  single(x(:,:,:,mode==2)),            [vs 0 1 0], prec(mode==2));
     end
     
     % Solve inversion using conjugate-gradient
@@ -50,8 +58,8 @@ function dy = cg(H, g, w, mode, prec, vs, opt)
     HH = @(b) spm_field('Atimesp', H, b) + prior(b);
     if opt.precond, precond = iM;
     else,           precond = []; end
-    dy = optim.cg(HH, g, dy, precond, opt.nbiter, opt.tolerance, opt.verbose);
-    
+    [dy,info] = optim.cg(HH, g, dy, precond, opt.nbiter, opt.tolerance, opt.verbose);
+    info.time_init = time_init;
 end
 
     

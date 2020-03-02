@@ -16,9 +16,9 @@ function u = uncertainty(H, lam, vs, w)
 
     spm_field('boundary', 1);
     spm_diffeo('boundary', 1);
-    u   = spm_field('diaginv1', H, w, [vs 1], lam.^2);
+    u   = spm_field('diaginv1', H, w, [vs 1], lam);
     scl = spm_diffeo('kernel', [3 3 3], [vs 0 1 0 0 0]);
     scl = double(abs(scl(1,1,1)));
-    u   = bsxfun(@times, u, reshape(scl*lam.^2, 1, 1, 1, []));
+    u   = bsxfun(@times, u, reshape(scl*lam, 1, 1, 1, []));
 
 end
