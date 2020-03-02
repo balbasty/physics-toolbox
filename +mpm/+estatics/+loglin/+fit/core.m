@@ -47,7 +47,7 @@ for it=1:3
     % ---------------------------------------------------------------------
     % Update maps
     % ---------------------------------------------------------------------
-    [ind,K] = symIndices(nbcontrasts);              % Sparse indices for symmetric matrices
+    [ind,K] = utils.symIndices(nbcontrasts);        % Sparse indices for symmetric matrices
     g   = zeros([out.dim nbcontrasts], 'single');   % Gradient
     H   = zeros([out.dim K], 'single');             % Hessian (symmetric 4x4 matrix)
     llx = 0;                                        % Log-likelihood: data term
