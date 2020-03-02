@@ -39,15 +39,17 @@ opt = utils.setdefault(opt, 'verbose',     1);
 if opt.verbose > 0, fprintf('B1 field\n'); end
 
 b1 = single(model.b1());
+prec   = [opt.b1.prec.abs opt.b1.prec.mem opt.b1.prec.ben];
 
 if opt.verbose > 0, fprintf('\tGradient: data '); end
 [llx,gx,Hx] = b1p.bs.b1.gradient(dat, model, opt);
 if opt.verbose > 0, fprintf('\n'); end
 
 if opt.verbose > 0, fprintf('\tGradient: prior '); end
-[llb,gb]    = b1p.bs.b1.prior(b1, opt.b1.prec, opt.vs);
+[llb,gb] = b1p.bs.b1.prior(b1, prec, opt.vs);
+gx       = gx + gb; clear gb
 if opt.verbose > 0, fprintf('.\n'); end
 
 if opt.verbose > 0, fprintf('\tUpdate: '); end
-model.b1(:,:,:) = b1 - spm_field(Hx, gx+gb, [opt.vs 0 0 opt.b1.prec]);
+model.b1(:,:,:) = b1 - spm_field(Hx, gx, [opt.vs prec]);
 if opt.verbose > 0, fprintf('.\n'); end

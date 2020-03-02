@@ -42,28 +42,31 @@ m = single(model.mean());
 % Loop over pulses
 for p=1:Np
     w  = dat.pulse.sign(p);                         % sign of BS pulse
-    k  = dat.pulse.const;                           % const of BS pulse
+    k  = dat.pulse.factor;                          % const of BS pulse
     b1 = single(model.b1());                        % square of b1
     if opt.b1.log, b1 = exp(2*b1); end
     b1 = exp(1i*w*k*b1);                            % complex phase shift
     y0 = m .* b1;                                   % shifted object
     
     lam = dat.prec(c,p);                            % precision
-    x   = single(dat.coils(:,:,:,c,o));             % observed
+    x   = single(dat.coils(:,:,:,c,p));             % observed
     msk = ~isfinite(x);                             % mask of missing data
     x(msk)  = 0;
     y0(msk) = 0;
     s   = single(model.sens(:,:,:,c));              % sensitivity
     r   = y0 .* s - x;                              % fit
-    ll  = ll - 0.5 * lam * sum(abs(r).^2, 'double'); 
+    ll  = ll - 0.5 * lam * sum(abs(r(:)).^2, 'double'); 
     if nargout > 1
         g = g + lam * conj(r) .* y0;
-        g = cat(4, real(g), imag(g));
     end
     if nargout > 2
         H = H + lam * real(conj(y0) .* y0);
     end
     if opt.verbose > 0, fprintf('.'); end
+end
+
+if nargout > 1
+    g = cat(4, real(g), imag(g));
 end
 
 % =========================================================================

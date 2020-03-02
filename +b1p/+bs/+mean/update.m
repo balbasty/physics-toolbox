@@ -10,10 +10,10 @@ function [model,llx,llm] = update(dat,model,opt)
 % H     - {r} {Nx Ny Nz} Hessian 
 %
 % `dat` has fields:
-% . coils       - {c} {Nx Ny Nz Nc Np} - Observed coil images with +/- pulse
-% . prec        - {r} {Nc Np}          - Noise precision
-% . pulse.sign  - {r} {1 Np}           - Sign of Bloch-Siegert pulse
-% . pulse.const - {r} {1}              - Constant of Bloch-Siegert pulse
+% . coils        - {c} {Nx Ny Nz Nc Np} - Observed coil images with +/- pulse
+% . prec         - {r} {Nc Np}          - Noise precision
+% . pulse.sign   - {r} {1 Np}           - Sign of Bloch-Siegert pulse
+% . pulse.factor - {r} {1}              - Constant of Bloch-Siegert pulse
 % `model` has fields
 % . mean        - {c} {Nx Ny Nz}       - Object signal (mean image)
 % . sens        - {c} {Nx Ny Nz Nc}    - Receive sensitivities
@@ -37,18 +37,24 @@ opt = utils.setdefault(opt, 'b1.prec',     1);
 opt = utils.setdefault(opt, 'mean.prec',   1);
 opt = utils.setdefault(opt, 'verbose',     1);
 
-if opt.verbose > 0, fprintf('Mean image\m'); end
+if opt.verbose > 0, fprintf('Mean image\n'); end
 
-meanim = single(model.meanim());
+meanim = single(model.mean());
+meanim = cat(4, real(meanim), imag(meanim));
+prec   = [opt.mean.prec.abs opt.mean.prec.mem opt.mean.prec.ben];
 
 if opt.verbose > 0, fprintf('\tGradient: data '); end
 [llx,gx,Hx] = b1p.bs.mean.gradient(dat, model, opt);
 if opt.verbose > 0, fprintf('\n'); end
 
 if opt.verbose > 0, fprintf('\tGradient: prior '); end
-[llm,gm]    = b1p.bs.mean.prior(b1, opt.mean.prec, opt.vs);
+[llm,gm] = b1p.bs.mean.prior(meanim, prec, dat.vs);
+gx       = gx + gm; clear gm
 if opt.verbose > 0, fprintf('.\n'); end
 
+
 if opt.verbose > 0, fprintf('\tUpdate: '); end
-model.mean(:,:,:) = meanim - spm_field(Hx, gx+gm, [opt.vs 0 0 opt.mean.prec]);
+meanim(:,:,:,1) = meanim(:,:,:,1) - spm_field(Hx, gx(:,:,:,1), [dat.vs prec]);
+meanim(:,:,:,2) = meanim(:,:,:,2) - spm_field(Hx, gx(:,:,:,2), [dat.vs prec]);
+model.mean(:,:,:) = complex(meanim(:,:,:,1), meanim(:,:,:,2));
 if opt.verbose > 0, fprintf('.\n'); end

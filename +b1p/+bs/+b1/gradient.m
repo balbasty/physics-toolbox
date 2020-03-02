@@ -42,7 +42,7 @@ meanim = single(model.mean());
 % Loop over pulses
 for p=1:Np
     w  = dat.pulse.sign(p);                         % sign of BS pulse
-    k  = dat.pulse.const;                           % sign of BS pulse
+    k  = dat.pulse.factor;                          % sign of BS pulse
     b1 = single(model.b1());                        % square of b1
     if opt.b1.log, b1 = exp(2*b1); end
     y0 = meanim .* exp(1i*w*k*b1);
@@ -50,18 +50,18 @@ for p=1:Np
     for c=1:Nc
         lam = dat.prec(c,p);                        % precision
         y   = single(model.sens(:,:,:,c)) .* y0;    % fit
-        x   = single(dat.coils(:,:,:,c,o));         % observed
+        x   = single(dat.coils(:,:,:,c,p));         % observed
         msk = ~isfinite(x);                         % mask of missing data
         x(msk) = 0;
         y(msk) = 0;
-        ll  = ll - 0.5 * lam * sum(abs(y-x).^2, 'double'); 
+        ll  = ll - 0.5 * lam * sum(abs(y(:)-x(:)).^2, 'double'); 
         if nargout > 1
             g = g - lam * w * k * imag(conj(y).*x);
-            if opt.b1.log, g = 2 * g * b1; end
+            if opt.b1.log, g = 2 * g .* b1; end
         end
         if nargout > 2
             H = H + lam * abs(y).^2;
-            if opt.b1.log, H = 2 * H * b1.^2; end
+            if opt.b1.log, H = 2 * H .* b1.^2; end
         end
         if opt.verbose > 0, fprintf('.'); end
     end

@@ -15,6 +15,5 @@ if nargin < 2, prec = 1;       end
 if nargin < 3, vs   = [1 1 1]; end
 
 s  = single(s());
-s  = cat(4, real(s), imag(s));
-g  = spm_field('vel2mom', s, [vs 0 0 prec]);
+g  = spm_field('vel2mom', s, [vs prec]);
 ll = -0.5 * s(:)'*g(:);

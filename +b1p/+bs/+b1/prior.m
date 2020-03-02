@@ -11,9 +11,9 @@ function [ll,g] = prior(b1,prec,vs)
 % {r|c}    - Real or complex data
 % Nx/Ny/Nz - Image dimensions
 
-if nargin < 2, prec = 1;       end
+if nargin < 2, prec = [0 0 1]; end
 if nargin < 3, vs   = [1 1 1]; end
 
 b1 = single(b1());
-g  = spm_field('vel2mom', b1, [vs 0 0 prec]);
+g  = spm_field('vel2mom', b1, [vs prec]);
 ll = -0.5 * b1(:)'*g(:);

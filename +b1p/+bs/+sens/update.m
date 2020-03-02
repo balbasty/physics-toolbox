@@ -41,24 +41,28 @@ opt = utils.setdefault(opt, 'verbose',     1);
 
 if opt.verbose > 0, fprintf('Receive field\n'); end
 
+prec = [opt.sens.prec.abs opt.sens.prec.mem opt.sens.prec.ben];
+
 for c=1:size(dat.coils,4)
 
     if opt.verbose > 0, fprintf('#%d\n', c); end
     
-    sens = single(dat.sens(:,:,:,c,:));
+    sens = single(model.sens(:,:,:,c,:));
+    sens = cat(4, real(sens), imag(sens));
     
     if opt.verbose > 0, fprintf('\tGradient: data '); end
-    [llx,gx,Hx] = b1p.bs.sens.gradient(dat, model, opt);
+    [llx,gx,Hx] = b1p.bs.sens.gradient(c, dat, model, opt);
     if opt.verbose > 0, fprintf('\n'); end
 
     if opt.verbose > 0, fprintf('\tGradient: prior '); end
-    [lls,gs]    = b1p.bs.sens.prior(sens, opt.sens.prec, opt.vs);
+    [lls,gs] = b1p.bs.sens.prior(sens, prec, opt.vs);
+    gx       = gx + gs; clear gs
     if opt.verbose > 0, fprintf('.\n'); end
 
     if opt.verbose > 0, fprintf('\tUpdate: '); end
-    delta = complex(spm_field(Hx, gx(:,:,:,1)+gs(:,:,:,1), [opt.vs 0 0 opt.sens.prec]), ...
-                    spm_field(Hx, gx(:,:,:,2)+gs(:,:,:,2), [opt.vs 0 0 opt.sens.prec]));
-    model.sens(:,:,:,c) = sens - delta;
+    sens(:,:,:,1) = sens(:,:,:,1) - spm_field(Hx, gx(:,:,:,1), [opt.vs prec]);
+    sens(:,:,:,2) = sens(:,:,:,2) - spm_field(Hx, gx(:,:,:,2), [opt.vs prec]);
+    model.sens(:,:,:,c) = complex(sens(:,:,:,1), sens(:,:,:,2));
     if opt.verbose > 0, fprintf('.\n'); end
     
 end

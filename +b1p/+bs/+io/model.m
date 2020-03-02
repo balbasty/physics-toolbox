@@ -1,7 +1,7 @@
-function [outputArg1,outputArg2] = model(inputArg1,inputArg2)
-%MODEL Summary of this function goes here
-%   Detailed explanation goes here
-outputArg1 = inputArg1;
-outputArg2 = inputArg2;
-end
+function s = model(dim, vs, ncoils)
 
+s      = struct;
+s.mean = zeros(dim, 'like', single(1i));
+s.sens = zeros([dim ncoils], 'like', single(1i));
+s.b1   = zeros(dim, 'single');
+s.vs   = vs;
