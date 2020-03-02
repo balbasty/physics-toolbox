@@ -23,7 +23,7 @@ xmat = in.mat;                  % Observed orientation matrix
 
 ct  = in.type;                  % Contrast name
 mat = ymat\xmat;                % Observed-to-Model matrix
-dim = in.dim;                  % Observed dimensions
+dim = in.dim;                   % Observed dimensions
 lam = 1./in.var;                % Noise precision
 
 % -------------------------------------------------------------------------

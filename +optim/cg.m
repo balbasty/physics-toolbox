@@ -1,8 +1,8 @@
-function [x,nit,rr] = cg(A,b,x,iM,nit,tol,verbose,sumtype)
+function [x,info] = cg(A,b,x,iM,nit,tol,verbose,sumtype)
 % Conjugate gradient solver.
 % CG can be used to solve (large) linear systems: A*x = b
 %
-% FORMAT [x,nit,nrm,tol] = optim.cg(A,b,[x0],[iM],[nit],[tol],[verbose])
+% FORMAT [x,info] = optim.cg(A,b,[x0],[iM],[nit],[tol],[verbose],[sumtype])
 % A       - Function handle for the linear operator A*x (left-hand side)
 % b       - Target array (right-hand side)
 % x0      - Initial guess [0]
@@ -11,6 +11,11 @@ function [x,nit,rr] = cg(A,b,x,iM,nit,tol,verbose,sumtype)
 % tol     - Tolerance for early stopping [1E-3]
 % verbose - Verbosity level [0]
 % sumtype - Accumulator type 'native'/['double']
+% x       - A\b
+% info    - Structure with fields:
+%           . nbiter - Effective number of iterations
+%           . rr     - Root mean squared residuals (per iteration)
+%           . time   - Time (per iteration)
 %
 % Note that summing in single is twice as fast as summing in double, but
 % the additional precision is often needed.
@@ -39,12 +44,15 @@ end
 
 % -------------------------------------------------------------------------
 % Initialisation  
+start = tic;
+time  = [];
+
 bb = sqrt(sum(b(:).^2, sumtype));               % Norm of b: sqrt(b'*b)
 r  = b - A(x); clear b                          % Residual: b - A*x
 z  = iM(r);                                     % Preconditioned residual
 
 rr = sqrt(sum(r(:).^2, sumtype))/bb;            % Norm of r: sqrt(r'*r)
-rz = sum(r(:).*z(:), sumtype);                        % Inner product of r and z
+rz = sum(r(:).*z(:), sumtype);                  % Inner product of r and z
 p     = z;                                      % Initial conjugate directions p
 beta  = 0;                                      % Initial step size
   
@@ -72,14 +80,11 @@ for j=1:nit
     
     % ---------------------------------------------------------------------
     % Check convergence
-    rr0 = rr;
-    rr  = sqrt(sum(r(:).^2, sumtype))/bb;    
-    if rr > rr0
-        if verbose, fprintf('x'); end
-        rr = rr0;
-        x  = x - alpha * p;
-        break
-    elseif rr < tol
+    rr0  = rr(end);
+    rr1  = sqrt(sum(r(:).^2, sumtype))/bb;
+    rr   = [rr rr1];
+    time = [time toc(start)];
+    if rr1 < tol
         fprintf('o');
         break;
     elseif verbose
@@ -98,6 +103,6 @@ for j=1:nit
 end
 if verbose, fprintf('\n'); end
 
-nit   = j;
-
-end
+info.nbiter = j;
+info.rr     = rr;
+info.time   = time;

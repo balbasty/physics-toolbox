@@ -1,4 +1,4 @@
-function [out,in] = fit(in,opt)
+function [out,in,pred] = fit(in,opt)
 % Loglinear ESTATICS fit.
 %
 %   The ESTATICS model applies to multi-echo spoiled gradient-echo 
@@ -49,15 +49,15 @@ nbcontrasts = numel(contrasts);
 % -------------------------------------------------------------------------
 % Co-registration
 % -------------------------------------------------------------------------
-opt.verbose > 0 && fprintf('Coregister volumes\n');
 if opt.coreg
+    if opt.verbose > 0, fprintf('Coregister volumes\n'); end
     in = mpm.coregister(in);
 end
 
 % -------------------------------------------------------------------------
 % Prepare output
 % -------------------------------------------------------------------------
-opt.verbose > 0 && fprintf('Prepare output data structure\n');
+if opt.verbose > 0, fprintf('Prepare output data structure\n'); end
 % --- Field of view
 dim = zeros(3,0);
 mat = zeros(4, 4, 0);
@@ -65,13 +65,18 @@ for v=1:numel(in)
     dim(:,end+1)   = in{v}.dim(:)';
     mat(:,:,end+1) = in{v}.mat(:,:);
 end
-[dim,mat] = utils.fov(dim, mat, opt.vs, opt.fov);
+[dim,mat] = utils.fov(dim, mat, opt.vs, opt.fov, opt.mat);
 % --- Prefix/Value
 prefix = contrasts;
 value  = zeros(1,nbcontrasts);
 value(end) = 1;
 % --- Create
 out = mpm.io.output(prefix, dim(:), mat, value, 'single', opt.out);
+% --- Save TR/FA
+for v=1:numel(in)
+    out.(in{v}.type).extras.TR = in{v}.TR;
+    out.(in{v}.type).extras.FA = in{v}.FA;
+end
 
 % -------------------------------------------------------------------------
 % Loglinear fit
@@ -85,5 +90,7 @@ out = mpm.estatics.loglin.fit.core(in,out,coreopt);
 % Extrapolate signal to TE=0
 % -------------------------------------------------------------------------
 out = mpm.estatics.extrapolate(out,opt.out.fname);
+
+pred = mpm.estatics.predict(out,in,opt);
 
 utils.threads.set(nthreads0);

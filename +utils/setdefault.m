@@ -23,5 +23,5 @@ if isempty(field)
 else
     exists = isfield(o, field{1});
     if ~exists, o.(field{1}) = []; end
-    o.(field{1}) = setdefault(o.(field{1}), field(2:end), value, exists);
+    o.(field{1}) = utils.setdefault(o.(field{1}), field(2:end), value, exists);
 end

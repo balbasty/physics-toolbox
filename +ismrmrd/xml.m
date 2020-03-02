@@ -73,14 +73,10 @@ if isfield(schema, 'parse') && ~isempty(schema.parse)
                 switch childName(2:end)
                     case 'text'
                         value = schema.parse(char(theChild.getData));
-                        if (isnumeric(value) || islogical(value)) && isscalar(value)
-                            obj(end+1) = value;
+                        if isempty(obj)
+                            obj = value;
                         else
-                            if isempty(obj)
-                                obj = {value};
-                            else
-                                obj{end+1} = value;
-                            end
+                            obj(end+1) = value;
                         end
                     otherwise
                         warning('Unknown type %s',childName)
@@ -93,14 +89,10 @@ if isfield(schema, 'parse') && ~isempty(schema.parse)
         if isfield(schema, 'default')
             value = schema.parse(schema.default);
             for i=1:(schema.minOccurs-numel(obj))
-                if isnumeric(value)
-                    obj(end+1) = value;
+                if isempty(obj)
+                    obj = value;
                 else
-                    if isempty(obj)
-                        obj = {value};
-                    else
-                        obj{end+1} = value;
-                    end
+                    obj(end+1) = value;
                 end
             end
         end
@@ -111,11 +103,7 @@ if isfield(schema, 'parse') && ~isempty(schema.parse)
     if isfield(schema, 'maxOccurs')
         if numel(obj) > schema.maxOccurs
             warning('Too many values for %s (%d/%d)', nodeName, numel(obj), schema.maxOccurs);
-            if iscell(obj)
-                obj = obj{1:schema.maxOccurs};
-            else
-                obj = obj(1:schema.maxOccurs);
-            end
+            obj = obj(1:schema.maxOccurs);
         end
     end
     if numel(obj) == 1 && iscell(obj)
@@ -152,10 +140,7 @@ else
             if ~isfield(obj, childName)
                 obj.(childName) = child;
             else
-                if ~iscell(obj.(childName))
-                    obj.(childName) = {obj.(childName)};
-                end
-                obj.(childName){end+1} = child;
+                obj.(childName)(end+1) = child;
             end
        
         end

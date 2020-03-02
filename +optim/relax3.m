@@ -28,9 +28,10 @@ function [x,info] = relax3(A,b,iE,x,opt)
 % OUTPUT
 % ------
 % x       - Solution to the linear system
-% info    - Structure of info about the process, with fields
+% info    - Structure with fields:
 %           . nbiter - Effective number of iterations
-%           . rr     - Normalised residuals: sum((A*x-b).^2)/sum(b.^2)
+%           . rr     - Root mean squared residuals (per iteration)
+%           . time   - Time (per iteration)
 %
 % NOTA BENE
 % ---------
@@ -50,121 +51,132 @@ function [x,info] = relax3(A,b,iE,x,opt)
 %       algorithm. Neuroimage, 38(1), pp.95-113.
 
 
-    % ---------------------------------------------------------------------
-    % Parse arguments
-    % ---------------------------------------------------------------------
-    if nargin < 4 || isempty(x) || (isscalar(x) && isnan(x))
-        x = zeros(size(b), 'like', b);
-    end
-    if nargin < 5
-        opt = struct;
-    end
-    if ~isfield(opt, 'nbiter'),    opt.nbiter    = 10;        end
-    if ~isfield(opt, 'tolerance'), opt.tolerance = 1E-3;      end
-    if ~isfield(opt, 'band'),      opt.band      = 'checker'; end
-    if ~isfield(opt, 'verbose'),   opt.verbose   = true;      end
-    if ~isfield(opt, 'sumtype'),   opt.sumtype   = 'double';  end
-    if isnumeric(opt.band)
-        opt.band = utils.pad(opt.band(:)', [0 3-numel(opt.band)], 'replicate', 'post');
-    end
-
-    
-    % ---------------------------------------------------------------------
-    % Initial residuals
-    % ---------------------------------------------------------------------
-    dim = [size(b) 1];
-    dim = dim(1:3);
-    bb  = sum(b(:).^2, opt.sumtype);
-    r   = b - A(x);
-    rr  = sum(r(:).^2, opt.sumtype);
-    rr  = rr/bb;
-    if opt.verbose
-        fprintf('Relax: ');
-    end
-    
-    
-    % ---------------------------------------------------------------------
-    % Checkerboard
-    % ---------------------------------------------------------------------
-    checker = ischar(opt.band) && strcmpi(opt.band, 'checker');
-    if checker
-        checkerboard = reshape(1:(2*ceil(dim(1)/2)), [], 1, 1);
-        checkerboard = bsxfun(@plus, checkerboard, reshape(1:(2*ceil(dim(2)/2)), 1, [], 1));
-        checkerboard = bsxfun(@plus, checkerboard, reshape(1:(2*ceil(dim(3)/2)), 1, 1, []));
-        checkerboard = rem(checkerboard, 2);
-        checkerboard = checkerboard(1:dim(1),1:dim(2),1:dim(3));
-    end
-    
-    % ---------------------------------------------------------------------
-    % Main loop
-    % ---------------------------------------------------------------------
-    b = reshape(b, [], size(b,4));
-    for it=1:opt.nbiter
-        
-        if checker
-        % -----------------------------------------------------------------
-        % Red and black scheme
-            
-            for j=[0 1]
-                sub = (checkerboard == j);
-
-                % Compute residuals
-                r = reshape(r, [], size(r,4));
-                r(sub,:) = b(sub,:) - A(x,sub);
-                r = reshape(r, [dim size(r,2)]);
-
-                % Solve easy (smoothed) inverse problem
-                x = reshape(x, [], size(x,4));
-                x(sub,:) = x(sub,:) + iE(r,sub);
-                x = reshape(x, [dim size(x,2)]);
-            end
-            
-        else
-        % -----------------------------------------------------------------
-        % 'band' scheme
-            
-            for k0=1:opt.band(3)
-                k = k0:opt.band(3):dim(3);
-                for j0=1:opt.band(2)
-                    j = j0:opt.band(2):dim(2);
-                    for i0=1:opt.band(1)
-                        i = i0:opt.band(1):dim(1);
-                        
-                        sub = sub2ind(dim,i,j,k);
-                        
-                        % Compute residuals
-                        r = reshape(r, [], size(r,4));
-                        r(sub,:) = b(sub,:) - A(x,sub);
-                        r = reshape(r, [dim size(r,2)]);
-
-                        % Solve easy (smoothed) inverse problem
-                        x = reshape(x, [], size(x,4));
-                        x(sub,:) = x(sub,:) + iE(r,sub);
-                        x = reshape(x, [dim size(x,2)]);
-
-                    end
-                end
-
-            end
-            
-        end
-        
-        % Compute residuals
-        rr0 = rr;
-        rr  = sum(r(:).^2, 'double');
-        rr  = rr/bb;
-        if rr < opt.tolerance
-            if opt.verbose, fprintf('o'); end
-            break
-        elseif opt.verbose
-            if rr > rr0, fprintf('x');
-            else,        fprintf('.'); end
-        end
-    end
-    if opt.verbose
-        fprintf('\n');
-    end
-    
-    info.nbiter = it;
-    info.rr     = rr;
+% -------------------------------------------------------------------------
+% Parse arguments
+% -------------------------------------------------------------------------
+if nargin < 4 || isempty(x) || (isscalar(x) && isnan(x))
+    x = zeros(size(b), 'like', b);
 end
+if nargin < 5
+    opt = struct;
+end
+if ~isfield(opt, 'nbiter'),    opt.nbiter    = 10;        end
+if ~isfield(opt, 'tolerance'), opt.tolerance = 1E-3;      end
+if ~isfield(opt, 'band'),      opt.band      = 'checker'; end
+if ~isfield(opt, 'verbose'),   opt.verbose   = true;      end
+if ~isfield(opt, 'sumtype'),   opt.sumtype   = 'double';  end
+if isnumeric(opt.band)
+    opt.band = utils.pad(opt.band(:)', [0 3-numel(opt.band)], 'replicate', 'post');
+end
+
+
+% -------------------------------------------------------------------------
+% Initial residuals
+% -------------------------------------------------------------------------
+dim = [size(b) 1];
+dim = dim(1:3);
+bb  = sqrt(sum(b(:).^2, opt.sumtype));
+r   = b - A(x);
+rr  = sqrt(sum(r(:).^2, opt.sumtype));
+rr  = rr/bb;
+if opt.verbose
+    fprintf('Relax: ');
+end
+
+
+% -------------------------------------------------------------------------
+% Checkerboard
+% -------------------------------------------------------------------------
+checker = ischar(opt.band) && strcmpi(opt.band, 'checker');
+if checker
+    checkerboard = reshape(1:(2*ceil(dim(1)/2)), [], 1, 1);
+    checkerboard = bsxfun(@plus, checkerboard, reshape(1:(2*ceil(dim(2)/2)), 1, [], 1));
+    checkerboard = bsxfun(@plus, checkerboard, reshape(1:(2*ceil(dim(3)/2)), 1, 1, []));
+    checkerboard = rem(checkerboard, 2);
+    checkerboard = checkerboard(1:dim(1),1:dim(2),1:dim(3));
+end
+
+% -------------------------------------------------------------------------
+% Main loop
+% -------------------------------------------------------------------------
+b = reshape(b, [], size(b,4));
+start = tic;
+time  = [];
+for it=1:opt.nbiter
+
+    if checker
+    % ---------------------------------------------------------------------
+    % Red and black scheme
+
+        for j=[0 1]
+            sub = (checkerboard == j);
+
+            if false
+            % Compute residuals
+            r = reshape(r, [], size(r,4));
+            r(sub,:) = b(sub,:) - A(x,sub);
+            r = reshape(r, [dim size(r,2)]);
+            end
+
+            % Solve easy (smoothed) inverse problem
+            x = reshape(x, [], size(x,4));
+            x(sub,:) = x(sub,:) + iE(r,sub);
+            x = reshape(x, [dim size(x,2)]);
+            
+            if true
+            % Compute residuals
+            r = reshape(b, [dim size(b,2)]) - A(x);
+            end
+        end
+
+    else
+    % ---------------------------------------------------------------------
+    % 'band' scheme
+
+        for k0=1:opt.band(3)
+            k = k0:opt.band(3):dim(3);
+            for j0=1:opt.band(2)
+                j = j0:opt.band(2):dim(2);
+                for i0=1:opt.band(1)
+                    i = i0:opt.band(1):dim(1);
+
+                    sub = sub2ind(dim,i,j,k);
+
+                    % Compute residuals
+                    r = reshape(r, [], size(r,4));
+                    r(sub,:) = b(sub,:) - A(x,sub);
+                    r = reshape(r, [dim size(r,2)]);
+
+                    % Solve easy (smoothed) inverse problem
+                    x = reshape(x, [], size(x,4));
+                    x(sub,:) = x(sub,:) + iE(r,sub);
+                    x = reshape(x, [dim size(x,2)]);
+
+                end
+            end
+
+        end
+
+    end
+
+    % Compute residuals
+    rr0  = rr(end);
+    rr1  = sqrt(sum(r(:).^2, opt.sumtype));
+    rr1  = rr1/bb;
+    rr   = [rr rr1];
+    time = [time toc(start)];
+    if rr1 < opt.tolerance
+        if opt.verbose, fprintf('o'); end
+        break
+    elseif opt.verbose
+        if rr1 > rr0, fprintf('x');
+        else,         fprintf('.'); end
+    end
+end
+if opt.verbose
+    fprintf('\n');
+end
+
+info.nbiter = it;
+info.rr     = rr;
+info.time   = time;

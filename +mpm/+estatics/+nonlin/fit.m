@@ -1,4 +1,4 @@
-function out = fit(in,opt)
+function [out,in,pred] = fit(in,opt)
 % Nonlinear ESTATICS fit.
 %
 %   The ESTATICS model applies to multi-echo spoiled gradient-echo 
@@ -82,28 +82,29 @@ opt.reg.mode = cell2mat(cellfun(@(x) reg0.mode.(x), contrasts(:), 'UniformOutput
 opt.reg.prec = cell2mat(cellfun(@(x) reg0.prec.(x), contrasts(:), 'UniformOutput', false));
 opt.reg.mean = cellfun(@(x) reg0.mean.(x), contrasts(:));
 % --- estimate mean parameter value + correct regularisation
-opt.verbose > 0 && fprintf('Guess mean parameter value to correct regularisation\n');
+if opt.verbose > 0, fprintf('Guess mean parameter value to correct regularisation\n'); end
 mu = mpm.estatics.loglin.fit.mini(in);
 mu = cellfun(@(x) mu.(x).dat, contrasts(:));
 opt.reg.mean(isnan(opt.reg.mean)) = mu(isnan(opt.reg.mean));
-opt.reg.prec(:,2) = opt.reg.prec(:,2) ./ abs(mu(:));
+opt.reg.prec(:,2) = opt.reg.prec(:,2) ./ mu(:).^2;
+if opt.verbose > 0
 for n=1:numel(mu)
-    opt.verbose > 0 && fprintf('* Param %d | mean: %7.3g | prec: %7.3g\n', n, mu(n), opt.reg.prec(n,2));
+    fprintf('* Param %d | mean: %7.3g | prec: %7.3g\n', n, mu(n), opt.reg.prec(n,2));
 end
-% TODO: ^ is this correct for L2 regularisation?
+end
 
 % -------------------------------------------------------------------------
 % Co-registration
 % -------------------------------------------------------------------------
-opt.verbose > 0 && fprintf('Coregister volumes\n');
 if opt.coreg
+    if opt.verbose > 0, fprintf('Coregister volumes\n'); end
     in = mpm.coregister(in);
 end
 
 % -------------------------------------------------------------------------
 % Prepare output
 % -------------------------------------------------------------------------
-opt.verbose > 0 && fprintf('Prepare output data structure\n');
+if opt.verbose > 0, fprintf('Prepare output data structure\n'); end
 % --- Field of view
 dim = zeros(3,0);
 mat = zeros(4, 4, 0);
@@ -111,7 +112,7 @@ for v=1:numel(in)
     dim(:,end+1)   = in{v}.dim(:)';
     mat(:,:,end+1) = in{v}.mat(:,:);
 end
-[dim,mat] = utils.fov(dim, mat, opt.vs, opt.fov);
+[dim,mat] = utils.fov(dim, mat, opt.vs, opt.fov, opt.mat);
 % --- Multiscale settings
 scales = mpm.compute_scales(opt.nbscales, dim, mat, opt.subsample);
 % --- Prefix/Value
@@ -142,7 +143,7 @@ end
 % -------------------------------------------------------------------------
 switch lower(opt.init)
     case 'logfit'
-        opt.verbose > 0 && fprintf('Initial loglinear fit\n');
+        if opt.verbose > 0, fprintf('Initial loglinear fit\n'); end
         out = mpm.estatics.loglinfit.core(in,out,opt.subsample,opt.verbose);
     case 'mean'
         for k=1:numel(contrasts)
@@ -151,13 +152,13 @@ switch lower(opt.init)
     otherwise
         error('Initialisation mode ''%s'' not implemented.', init);
 end
-opt.verbose > 1 && mpm.estatics.plot.progress(out,[]);
+if opt.verbose > 1, mpm.estatics.plot.progress(out,[]); end
 
 % -------------------------------------------------------------------------
 % Nonlinear fit
 % -------------------------------------------------------------------------
-opt.verbose > 0 && fprintf('Full nonlinear fit\n');
-ll = [];
+if opt.verbose > 0, fprintf('ESTATICS nonlinear fit\n'); end
+ll  = [];
 scl = [];
 opt.reg.prec0 = opt.reg.prec;
 for s=numel(scales):-1:1
@@ -165,7 +166,7 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     % Get scale specific parameters
     % ---------------------------------------------------------------------
-    opt.verbose > 0 && fprintf('Scale %i\n', s);
+    if opt.verbose > 0, fprintf('Scale %i\n', s); end
     dim = scales(s).dim;
     % vs  = scales(s).vs;
     vs  = sqrt(sum(scales(s).mat(1:3,1:3).^2));
@@ -176,12 +177,12 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     % A bit of ad-hoc fudging for L2 regularisation
     % ---------------------------------------------------------------------
-    opt.reg.prec(opt.reg.mode(:,2)==2,2) = opt.reg.prec(opt.reg.mode(:,2)==2,2) * power(10,s-1);
+%     opt.reg.prec(opt.reg.mode(:,2)==2,2) = opt.reg.prec(opt.reg.mode(:,2)==2,2) * power(10,s-1);
     
     it0 = numel(ll)+1;
     for it=1:(opt.nbiter+s)
     
-        opt.verbose > 0 && fprintf('Iteration %i\n', it);
+        if opt.verbose > 0, fprintf('Iteration %i\n', it); end
 
         % -----------------------------------------------------------------
         % Update maps
@@ -194,9 +195,9 @@ for s=numel(scales):-1:1
 
         % -----------------------------------------------------------------
         % Loop over volumes
-        opt.verbose > 0 && fprintf('Gradient: data ');
+        if opt.verbose > 0, fprintf('Gradient: data '); end
         for v=1:numel(in)
-            opt.verbose > 0 && fprintf('%d',v);
+            if opt.verbose > 0, fprintf('%d',v); end
 
             % - Compute gradient
             subopt = struct('subsample', sub, 'verbose', opt.verbose);
@@ -215,14 +216,14 @@ for s=numel(scales):-1:1
             H(:,:,:,Hind) = H(:,:,:,Hind) + H1;
             clear H1
             
-            opt.verbose > 0 && fprintf(' ');
+            if opt.verbose > 0, fprintf(' '); end
         end
-        opt.verbose > 0 && fprintf('\n');
+        if opt.verbose > 0, fprintf('\n'); end
 
         % -----------------------------------------------------------------
         % Gradient: Absolute
         if any(opt.reg.mode(:,1) > 0)
-            opt.verbose > 0 && fprintf('Gradient: absolute ');
+            if opt.verbose > 0, fprintf('Gradient: absolute '); end
             for k=1:nbcontrasts
                 if opt.reg.mode(k,1) == 2
                     fprintf('.');
@@ -233,20 +234,20 @@ for s=numel(scales):-1:1
                     clear y
                 end
             end
-            opt.verbose > 0 && fprintf('\n');
+            if opt.verbose > 0, fprintf('\n'); end
         end
 
         % -----------------------------------------------------------------
         % Gradient: Membrane
         if any(opt.reg.mode(:,2) > 0)
-            opt.verbose > 0 && fprintf('Gradient: membrane ');
+            if opt.verbose > 0, fprintf('Gradient: membrane '); end
             w    = 0;
             wnew = 0;
             if any(opt.reg.mode(:,2) == 1), w = 1./single(out.W.dat()); end
             for k=1:nbcontrasts
                 switch opt.reg.mode(k,2)
                     case 1
-                        opt.verbose > 0 && fprintf('.');
+                        if opt.verbose > 0, fprintf('.'); end
                         Ly = single(out.(contrasts{k}).dat());
                         [Ly,Dy] = mpm.l1.vel2mom(Ly, opt.reg.prec(k,2), vs, w);
                         Dy = sum(sum(Dy.^2,5),4);
@@ -254,7 +255,7 @@ for s=numel(scales):-1:1
                         g(:,:,:,k) = g(:,:,:,k) + Ly;
                         clear Ly
                     case 2
-                        opt.verbose > 0 && fprintf('.');
+                        if opt.verbose > 0, fprintf('.'); end
                         y  = single(out.(contrasts{k}).dat());
                         Ly = mpm.l2.vel2mom(y, opt.reg.prec(k,2), vs);
                         g(:,:,:,k) = g(:,:,:,k) + Ly;
@@ -262,7 +263,7 @@ for s=numel(scales):-1:1
                         clear y Ly
                 end
             end
-            opt.verbose > 0 && fprintf('\n');
+            if opt.verbose > 0, fprintf('\n'); end
             if any(opt.reg.mode(:,2) == 1)
                 if ischar(opt.reg.uncertainty) && strcmpi(opt.reg.uncertainty, 'bayes')
                     wnew = sqrt(wnew + sum(single(out.U.dat()), 4));
@@ -276,13 +277,13 @@ for s=numel(scales):-1:1
         % -----------------------------------------------------------------
         % Update MTV weights
         if any(opt.reg.mode(:,2)==1)
-            opt.verbose > 0 && fprintf('Update: MTV weights\n');
+            if opt.verbose > 0, fprintf('Update: MTV weights\n'); end
             out.W.dat(:,:,:) = wnew; clear Wnew
         end
 
         % -----------------------------------------------------------------
         % Log-likelihood
-        ll = [ll llx+lly];
+        ll  = [ll llx+lly];
         scl = [scl s];
 
         % -----------------------------------------------------------------
@@ -308,7 +309,7 @@ for s=numel(scales):-1:1
         end
         clear H g W
         % - Update
-        opt.verbose > 0 && fprintf('Update: maps\n');
+        if opt.verbose > 0, fprintf('Update: maps\n'); end
         for k=1:nbcontrasts
             ct = contrasts{k};
             switch ct
@@ -330,10 +331,10 @@ for s=numel(scales):-1:1
 
         % -----------------------------------------------------------------
         % Plot
-        opt.verbose > 1 && mpm.estatics.plot.progress(out,ll,scl);
-        opt.verbose > 0 && fprintf('%s\n', repmat('-',[1 80]));
-        opt.verbose > 0 && fprintf('ll = %7.3g | llx = %7.3g | lly = %7.3g | gain = %7.3g\n', ll(end), llx, lly, gain);
-        opt.verbose > 0 && fprintf('%s\n', repmat('-',[1 80]));
+        if opt.verbose > 1, mpm.estatics.plot.progress(out,ll,scl); end
+        if opt.verbose > 0, fprintf('%s\n', repmat('-',[1 80])); end
+        if opt.verbose > 0, fprintf('ll = %7.3g | llx = %7.3g | lly = %7.3g | gain = %7.3g\n', ll(end), llx, lly, gain); end
+        if opt.verbose > 0, fprintf('%s\n', repmat('-',[1 80])); end
        
         % -----------------------------------------------------------------
         % Out?
@@ -348,11 +349,13 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     if s ~= 1
         out = mpm.resize_output(out, scales(s-1).dim);
-        opt.verbose > 1 && mpm.estatics.plot.progress(out,ll,scl);
+        if opt.verbose > 1, mpm.estatics.plot.progress(out,ll,scl); end
     end
     
 end
 
 out = mpm.estatics.extrapolate(out,opt.out.fname);
+
+pred = mpm.estatics.predict(out,in,opt);
 
 utils.threads.set(nthreads0);

@@ -2,9 +2,9 @@ function out = fit(in,pre,opt)
 % Nonlinear MPM fit.
 %
 %   The MPM model derives unknown tissue (log(A), log(R1), log(R2*), 
-%   logit(MT)) and aquisition (log(B1+), log(B1/-)) parameters from 
+%   logit(MT)) and acquisition (log(B1+), log(B1/-)) parameters from 
 %   acquired volumes using their known influence on the signal equation. 
-%   Currently, itonly  handles multi-echo spoiled gradient-echo 
+%   Currently, it only  handles multi-echo spoiled gradient-echo 
 %   acquisitions. 
 %
 % FORMAT out = mpm.nonlin.fit(in,opt)
@@ -14,7 +14,7 @@ function out = fit(in,pre,opt)
 % opt - Structure of parameters with (optional) fields:
 %   parameters   ['']      Parameters to estimate
 %   nbscales     [5]       Number of scales (or zoom levels) 
-%   nbiter       [3]       Number of iterations per scale
+%   nbiter       [4]       Number of iterations per scale
 %   tolerance    [1E-4]    Gain threshold for early stopping (per scale)
 %   out.folder   ['.']     Output folder 
 %   out.fname    ['.nii']  Basis for output filenames 
@@ -35,7 +35,7 @@ function out = fit(in,pre,opt)
 %
 % Usually: `NaN` means 'informed default'
 %          `Inf` means 'as precise as possible'
-% reg.mode and reg.prec take two values: (1) absolute valuefPD,fT1,fMTs
+% reg.mode and reg.prec take two values: (1) absolute value
 %                                        (2) spatial gradients
 
 
@@ -59,9 +59,9 @@ issge       = cellfun(@(x) strcmpi(x.seq, 'SGE'), in);
 in          = in(issge);
 types       = cellfun(@(x) x.type, in, 'UniformOutput', false);
 if isempty(opt.parameters)
-    opt.parameters = {'logA' 'logR1' 'logR2s'};
+    opt.parameters = {'A' 'R1' 'R2s'};
     if any(strcmpi('MTw', types))
-        opt.parameters = [opt.parameters {'logMT'}];
+        opt.parameters = [opt.parameters {'MT'}];
     end
 end
 nbparameters = numel(opt.parameters);
@@ -104,6 +104,7 @@ for k=1:numel(fields)
     end
     
 end
+mu0 = mu;
 mu = cellfun(@(x) mu.(x).dat, opt.parameters(:));
 opt.reg.mean(isnan(opt.reg.mean)) = mu(isnan(opt.reg.mean));
 for k=1:numel(opt.reg.mean)
@@ -122,7 +123,7 @@ end
 % -------------------------------------------------------------------------
 % Co-registration
 % -------------------------------------------------------------------------
-opt.verbose > 0 && fprintf('Coregister volumes\n');
+if opt.verbose > 0, fprintf('Coregister volumes\n'); end
 if opt.coreg
     [in,pre] = mpm.coregister(in,pre);
 end
@@ -138,7 +139,7 @@ for v=1:numel(in)
     dim(:,end+1)   = in{v}.dim(:)';
     mat(:,:,end+1) = in{v}.mat(:,:);
 end
-[dim,mat] = utils.fov(dim, mat, opt.vs, opt.fov);
+[dim,mat] = utils.fov(dim, mat, opt.vs, opt.fov, opt.mat);
 % --- Multiscale settings
 scales = mpm.compute_scales(opt.nbscales, dim, mat, opt.subsample);
 % --- Prefix/Value
@@ -172,7 +173,7 @@ switch lower(opt.init)
     otherwise
         error('Initialisation mode ''%s'' not implemented.', init);
 end
-if opt.verbose > 1, mpm.nonlin.plot.progress(out,[]); end
+if opt.verbose > 1, mpm.nonlin.plot.progress(out,[],[],mu0); end
 
 % -------------------------------------------------------------------------
 % Nonlinear fit
@@ -188,40 +189,32 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     if opt.verbose > 0, fprintf('Scale %i\n', s); end
     dim = scales(s).dim;
-    % vs  = scales(s).vs;
     vs  = sqrt(sum(scales(s).mat(1:3,1:3).^2));
+    vol = prod(vs);
     sub = scales(s).sub;
-    ff  = 10^(s-1); % scales(s).ff;
-    opt.reg.prec = opt.reg.prec0 * prod(vs);
-    opt.reg.prec(opt.reg.mode == 2) = ff * opt.reg.prec(opt.reg.mode == 2);
-    opt.reg.prec(opt.reg.mode == 1) = sqrt(ff) * opt.reg.prec(opt.reg.mode == 1);
-    
-    % ---------------------------------------------------------------------
-    % A bit of ad-hoc fudging for L2 regularisation
-    % ---------------------------------------------------------------------
-    % opt.reg.prec(opt.reg.mode(:,2)==2,2) = opt.reg.prec(opt.reg.mode(:,2)==2,2) * power(10,s-1);
+    % opt.reg.prec = opt.reg.prec0 * vol;
     
     it0 = numel(ll)+1;
-    for it=1:(opt.nbiter+s)
+    for it=1:(opt.nbiter+s-1)
     
         if opt.verbose > 0, fprintf('Iteration %i\n', it); end
 
         % -----------------------------------------------------------------
         % Update maps
         % -----------------------------------------------------------------
-        [ind,K] = utils.symIndices(nbparameters);  % Sparse indices for symmetric matrices
-        g   = zeros([dim nbparameters], 'single'); % Gradient
-        H   = zeros([dim K], 'single');            % Hessian (symmetric 4x4 matrix)
-        llx = 0;                                   % Log-likelihood: data term
-        lly = 0;                                   % Log-likelihood: prior term
+        K   = nbparameters;               % Nb gradient elements
+        K2  = K*(K+1)/2;                  % Nb Hessian elements
+        g   = zeros([dim K],  'single');  % Gradient
+        H   = zeros([dim K2], 'single');  % Hessian (symmetric 4x4 matrix)
+        llx = 0;                          % Log-likelihood: data term
+        lly = 0;                          % Log-likelihood: prior term
 
         % -----------------------------------------------------------------
-        % Loop over volumes
+        % Gradient: Data term
         if opt.verbose > 0, fprintf('Gradient: data '); end
         for v=1:numel(in)
             if opt.verbose > 0, fprintf('%d',v); end
 
-            % - Compute gradient
             subopt = struct('subsample', sub, 'verbose', opt.verbose);
             [llx1,g1,H1] = mpm.nonlin.gradient(opt.parameters, in{v}, out, pre, subopt);
             
@@ -241,9 +234,9 @@ for s=numel(scales):-1:1
                 if opt.reg.mode(k,1) == 2
                     fprintf('.');
                     y = single(out.(opt.parameters{k}).dat()) - opt.reg.mean(k);
-                    g(:,:,:,k) = g(:,:,:,k) + opt.reg.prec(k,1) * y;
-                    H(:,:,:,k) = H(:,:,:,k) + opt.reg.prec(k,1);
-                    lly = lly - 0.5 * sum(y(:).^2, 'double');
+                    g(:,:,:,k) = g(:,:,:,k) + vol * opt.reg.prec(k,1) * y;
+                    H(:,:,:,k) = H(:,:,:,k) + vol * opt.reg.prec(k,1);
+                    lly = lly - 0.5 * vol * opt.reg.prec(k,1) * sum(y(:).^2, 'double');
                     clear y
                 end
             end
@@ -260,48 +253,39 @@ for s=numel(scales):-1:1
             for k=1:nbparameters
                 switch opt.reg.mode(k,2)
                     case 1
-                        opt.verbose > 0 && fprintf('.');
+                        if opt.verbose > 0, fprintf('.'); end
                         Ly = single(out.(opt.parameters{k}).dat());
                         [Ly,Dy] = mpm.l1.vel2mom(Ly, opt.reg.prec(k,2), vs, w);
                         Dy = sum(sum(Dy.^2,5),4);
                         wnew = wnew + Dy;
-                        g(:,:,:,k) = g(:,:,:,k) + Ly;
+                        g(:,:,:,k) = g(:,:,:,k) + vol * Ly;
                         clear Ly
                     case 2
-                        opt.verbose > 0 && fprintf('.');
+                        if opt.verbose > 0, fprintf('.'); end
                         y  = single(out.(opt.parameters{k}).dat());
                         Ly = mpm.l2.vel2mom(y, opt.reg.prec(k,2), vs);
-                        g(:,:,:,k) = g(:,:,:,k) + Ly;
-                        lly = lly - 0.5*sum(y(:).*Ly(:), 'double');
+                        g(:,:,:,k) = g(:,:,:,k) + vol * Ly;
+                        lly = lly - 0.5 * vol * sum(y(:).*Ly(:), 'double');
                         clear y Ly
                 end
             end
             if opt.verbose > 0, fprintf('\n'); end
             if any(opt.reg.mode(:,2) == 1)
-                if ischar(opt.reg.uncertainty) && strcmpi(opt.reg.uncertainty, 'bayes')
-                    wnew = sqrt(wnew + sum(single(out.U.dat()), 4));
-                else
-                    wnew = sqrt(wnew + opt.reg.uncertainty);
-                end
-                lly = lly - sum(wnew(:), 'double');
+                wnew = sqrt(wnew + opt.reg.uncertainty);
+                lly = lly - vol * sum(wnew(:), 'double');
             end
         end
 
         % -----------------------------------------------------------------
         % Update MTV weights
-        if any(opt.reg.mode(:,2)==1)
+        if any(opt.reg.mode(:,2)==1) % && it > (opt.nbiter+s-1)/2
             if opt.verbose > 0, fprintf('Update: MTV weights\n'); end
             out.W.dat(:,:,:) = wnew; clear Wnew
         end
 
         % -----------------------------------------------------------------
-        % Log-likelihood
-        ll  = [ll llx+lly];
-        scl = [scl s];
-
-        % -----------------------------------------------------------------
         % Load diagonal of the Hessian
-        H(:,:,:,1:nbparameters) = bsxfun(@plus, H(:,:,:,1:nbparameters), sum(H(:,:,:,1:nbparameters)) * eps('single'));
+        % H(:,:,:,1:nbparameters) = bsxfun(@plus, H(:,:,:,1:nbparameters), sum(H(:,:,:,1:nbparameters)) * eps('single'));
 
         % -----------------------------------------------------------------
         % Gauss-Newton
@@ -311,24 +295,193 @@ for s=numel(scales):-1:1
             dy = mpm.l0.solve(H,g);
         elseif any(opt.reg.mode(:,2) == 1)
         % Some L1 regularisation
-            dy = opt.solver.fun(H, g, w, opt.reg.mode(:,2), opt.reg.prec(:,2), vs, opt.solver);
-            % Uncertainty about y
-            if ischar(opt.reg.uncertainty) && strcmpi(opt.reg.uncertainty, 'bayes')
-                out.U.dat(:,:,:,:) = mpm.l1.uncertainty(H, opt.reg.prec(:,2), vs, w);
-            end
+            % dy = opt.solver.fun(H, g, w, opt.reg.mode(:,2), vol * opt.reg.prec(:,2), vs, opt.solver);
+            opt.solver.fmginit = false;
+            opt.solver.nbiter  = 40;
+            dy = mpm.l1.solve.cg(H, g, w, opt.reg.mode(:,2), vol * opt.reg.prec(:,2), vs, opt.solver);
+            opt.solver.nbiter  = 10;
+            dy = mpm.l1.solve.relax(H, g, w, opt.reg.mode(:,2), vol * opt.reg.prec(:,2), vs, opt.solver, dy);
         else
         % Some L2 but no L1 regularisation
-            dy = mpm.l2.solve(H, g, opt.reg.mode(:,2), opt.reg.prec(:,2), vs);
+            dy = mpm.l2.solve(H, g, opt.reg.mode(:,2), vol * opt.reg.prec(:,2), vs);
         end
         clear H g W
-        % - Update
-        if opt.verbose > 0, fprintf('Update: maps\n'); end
+%         % - Update
+%         if opt.verbose > 0, fprintf('Update: maps\n'); end
+%         for k=1:nbparameters
+%             prm = opt.parameters{k};
+%             switch prm
+%                 case 'A'
+%                     mn = 0;
+%                     mx = 2*mu(k);
+%                 case 'R1'
+%                     mn = 0;
+%                     mx = 2;
+%                 case 'R2s'
+%                     mn = 0;
+%                     mx = 120;
+%                 case 'MT'
+%                     mn = 0;
+%                     mx = 0.05;
+%                 case 'logA'
+%                     mn = -Inf;
+%                     mx = Inf;
+%                 case 'logR1'
+%                     mn = -Inf;
+%                     mx = log(2);
+%                 case 'logR2s'
+%                     mn = -Inf;
+%                     mx = log(120);
+%                 case 'logMT'
+%                     mn = -Inf;
+%                     mx = log(0.05) - log(1-0.05);
+%             end
+%             out.(prm).dat(:,:,:) = single(out.(prm).dat(:,:,:)) - max(mn,min(mx,opt.armijo * dy(:,:,:,k)));
+%         end
+%         clear dy
+
+        % -----------------------------------------------------------------
+        % Line Search
+        %   I have done a few simulations using typical values of R1/R2*
+        %   in the grey and white matter, and a line search was necessary
+        %   for convergence. I could not find a simple constant armijo 
+        %   factor that made Gauss-Newton both fast and robust. A line
+        %   search seems like the reasonable solutions (it requires
+        %   additional computation but allows an optimum to be found in few
+        %   iterations).
+        armijo = opt.armijo;
+        success = false;
+        llx0   = llx;
+        lly0   = lly;
+        fprintf('init: %g\n', llx+lly);
+        out0   = cell(1,nbparameters);
         for k=1:nbparameters
             prm = opt.parameters{k};
-            out.(prm).dat(:,:,:) = out.(prm).dat(:,:,:) - opt.armijo * dy(:,:,:,k);
+            out0{k} = single(out.(prm).dat());
+            % Store in memory for now
         end
-        clear dy
+        for ls=1:12
+            for k=1:nbparameters
+                prm = opt.parameters{k};
+                switch prm
+                    case 'A'
+                        mn = 0;
+                        mx = 2*mu(k);
+                    case 'R1'
+                        mn = 0;
+                        mx = 2;
+                    case 'R2s'
+                        mn = 0;
+                        mx = 120;
+                    case 'MT'
+                        mn = 0;
+                        mx = 0.05;
+                    case 'logA'
+                        mn = -Inf;
+                        mx = Inf;
+                    case 'logR1'
+                        mn = -Inf;
+                        mx = log(2);
+                    case 'logR2s'
+                        mn = -Inf;
+                        mx = log(120);
+                    case 'logMT'
+                        mn = -Inf;
+                        mx = log(0.05) - log(1-0.05);
+                end
+                % out.(prm).dat(:,:,:) = max(mn,min(mx,single(out0{k}) - armijo * dy(:,:,:,k)));
+                out.(prm).dat(:,:,:) = single(out0{k}) - armijo * dy(:,:,:,k);
+            end
+            
+            llx = 0;
+            lly = 0;
 
+            % -------------------------------------------------------------
+            % Loop over volumes
+            if opt.verbose > 0, fprintf('Log-likelihood: data '); end
+            for v=1:numel(in)
+                if opt.verbose > 0, fprintf('%d',v); end
+
+                subopt = struct('subsample', sub, 'verbose', opt.verbose);
+                llx1 = mpm.nonlin.gradient(opt.parameters, in{v}, out, pre, subopt);
+
+                llx = llx + llx1;
+                if opt.verbose > 0, fprintf(' '); end
+            end
+            if opt.verbose > 0, fprintf('\n'); end
+            
+            % -------------------------------------------------------------
+            % Absolute
+            if any(opt.reg.mode(:,1) > 0)
+                if opt.verbose > 0, fprintf('Log-likelihood: absolute '); end
+                for k=1:nbparameters
+                    if opt.reg.mode(k,1) == 2
+                        fprintf('.');
+                        y = single(out.(opt.parameters{k}).dat()) - opt.reg.mean(k);
+                        lly = lly - 0.5 * vol * opt.reg.prec(k,1) * sum(y(:).^2, 'double');
+                        clear y
+                    end
+                end
+                if opt.verbose > 0, fprintf('\n'); end
+            end
+
+            % -------------------------------------------------------------
+            % Membrane
+            if any(opt.reg.mode(:,2) > 0)
+                if opt.verbose > 0, fprintf('Log-likelihood: membrane '); end
+                w    = 0;
+                wnew = 0;
+                if any(opt.reg.mode(:,2) == 1), w = 1./single(out.W.dat()); end
+                for k=1:nbparameters
+                    switch opt.reg.mode(k,2)
+                        case 1
+                            opt.verbose > 0 && fprintf('.');
+                            Ly = single(out.(opt.parameters{k}).dat());
+                            [~,Dy] = mpm.l1.vel2mom(Ly, opt.reg.prec(k,2), vs, w);
+                            Dy = sum(sum(Dy.^2,5),4);
+                            wnew = wnew + Dy;
+                            clear Ly
+                        case 2
+                            opt.verbose > 0 && fprintf('.');
+                            y  = single(out.(opt.parameters{k}).dat());
+                            Ly = mpm.l2.vel2mom(y, opt.reg.prec(k,2), vs);
+                            lly = lly - 0.5 * vol * sum(y(:).*Ly(:), 'double');
+                            clear y Ly
+                    end
+                end
+                if opt.verbose > 0, fprintf('\n'); end
+                if any(opt.reg.mode(:,2) == 1)
+                    wnew = sqrt(wnew + opt.reg.uncertainty);
+                    lly  = lly - vol * sum(wnew(:), 'double');
+                end
+            end
+            
+            
+            % -------------------------------------------------------------
+            % Check success
+            fprintf('try: %g\n', llx+lly);
+            if (llx+lly) > (llx0+lly0)
+                success = true;
+                break
+            else
+                armijo = armijo/2;
+            end
+        end
+        if ~success
+            llx = llx0;
+            lly = lly0;
+            for k=1:nbparameters
+                prm = opt.parameters{k};
+                out.(prm).dat(:,:,:) = out0{k};
+            end
+        end
+        clear out0
+        
+        % -----------------------------------------------------------------
+        % Log-likelihood
+        ll  = [ll llx+lly];
+        scl = [scl s];
+        
         % -----------------------------------------------------------------
         % Gain
         if numel(ll) > it0
@@ -340,7 +493,7 @@ for s=numel(scales):-1:1
         % -----------------------------------------------------------------
         % Plot
         if opt.verbose > 0
-            if opt.verbose > 1, mpm.nonlin.plot.progress(out,ll,scl); end
+            if opt.verbose > 1, mpm.nonlin.plot.progress(out,ll,scl,mu0); end
             fprintf('%s\n', repmat('-',[1 80]));
             fprintf('ll = %7.3g | llx = %7.3g | lly = %7.3g | gain = %7.3g\n', ll(end), llx, lly, gain);
             fprintf('%s\n', repmat('-',[1 80]));
@@ -359,7 +512,7 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     if s ~= 1
         out = mpm.resize_output(out, scales(s-1).dim);
-        if opt.verbose > 1, mpm.nonlin.plot.progress(out,ll,scl); end
+        if opt.verbose > 1, mpm.nonlin.plot.progress(out,ll,scl,mu0); end
         % opt.armijo = opt.armijo/2;
     end
     

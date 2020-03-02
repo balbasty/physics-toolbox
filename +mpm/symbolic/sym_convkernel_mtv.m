@@ -38,8 +38,6 @@ LL = simplify(LL, 100);
 % We have to construct 7 voxel-specific convolution weights.
 % Each of these weights is obtained by convolving the weight image
 
-
-if true
 wker = sym(zeros(N,N,N,N,N,N));
 for i=1:N
 for j=1:N
@@ -59,9 +57,8 @@ for k=1:N
 end
 end
 end
-% wker = collect(wker, [lam0 lam1 lam2]);
 wker = simplify(wker, 100);
-c = ceil(N/2);
+c    = ceil(N/2);
 k111 = reshape(wker(c,c,c,:,:,:), [N N N]);
 k110 = reshape(wker(c,c,c-1,:,:,:), [N N N]);
 k112 = reshape(wker(c,c,c+1,:,:,:), [N N N]);
@@ -69,7 +66,6 @@ k101 = reshape(wker(c,c-1,c,:,:,:), [N N N]);
 k121 = reshape(wker(c,c+1,c,:,:,:), [N N N]);
 k011 = reshape(wker(c-1,c,c,:,:,:), [N N N]);
 k211 = reshape(wker(c+1,c,c,:,:,:), [N N N]);
-end
 
 
 % Convolution kernel for kernel weights:

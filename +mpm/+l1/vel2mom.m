@@ -3,7 +3,7 @@ function [y,Dy] = vel2mom(y, prec, vs, w)
 %
 %   In a reweighted least squares scheme, the L1 regulariser
 %   [tr(sqrt(f'K'L^2'Kf))] is replaced by a reweighted L2 regulariser 
-%   [tr(f'K'LWLKf)]. This function return the gradient of the reweighted 
+%   [tr(f'K'LWLKf)]. This function returns the gradient of the reweighted 
 %   regulariser [K'LWLKf] and the forward operator [LKf]
 %
 % FORMAT [KWKf,Kf] = mpm.l1.vel2mom(f, prec, vs, w)
@@ -15,7 +15,7 @@ function [y,Dy] = vel2mom(y, prec, vs, w)
 % Kf   - {nx ny nz 3 2}        - Forward differential operator 
 
     if nargout > 1
-        Dy  = prec * imgrad(y, vs);
+        Dy  = sqrt(prec) * utils.imgrad(y, vs);
     end
     
     spm_field('boundary', 1);

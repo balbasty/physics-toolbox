@@ -111,6 +111,7 @@ for v=1:V
         end
         N = numel(arg1);
         subinfo = cell(1,N);
+        [subinfo{1:N}] = deal(struct);
         for n=1:N
             arg2 = arg1{n};
             if ischar(arg2) || isa(arg2, 'nifti')
@@ -121,6 +122,8 @@ for v=1:V
                 if isstruct(arg2{end})
                     subinfo{n} = arg2{end};
                     arg2 = arg2(1:(end-1));
+                else
+                    subinfo{n} = struct;
                 end
                 arg3 = arg2{1};
                 if ischar(arg3) || isa(arg3, 'nifti')
@@ -146,11 +149,14 @@ for v=1:V
         vol.dim  = vol.dim(1:3);
     end
     if ~isfield(vol, 'mat0')
-        if strcmpi(vol.nii(1).mat0_intent, 'Scanner')
-            vol.mat0 = vol.nii(1).mat0;
-        elseif strcmpi(vol.nii(1).mat_intent, 'Scanner')
-            vol.mat0 = vol.nii(1).mat;
-        end
+        vol.mat0 = vol.nii(1).mat;
+%         if strcmpi(vol.nii(1).mat_intent, 'Scanner')
+%             vol.mat0 = vol.nii(1).mat;
+%         elseif strcmpi(vol.nii(1).mat0_intent, 'Scanner')
+%             vol.mat0 = vol.nii(1).mat;
+%         else
+%             vol.mat0 = eye(4);
+%         end
     end
     if ~isfield(vol, 'trf')
         vol.trf  = eye(4);
@@ -161,6 +167,7 @@ for v=1:V
     if ~isfield(vol, 'seq')
         vol.seq  = guessfield('seq', vol.nii);
     end
+    if isnan(vol.seq), vol.seq = 'SGE'; end
     if ~isfield(vol, 'type')
         vol.type = guessfield('type', vol.nii);
     end
@@ -187,6 +194,10 @@ for v=1:V
         smean = 0;
         for n=1:N
             fprintf('.');
+            fields = fieldnames(subinfo{n});
+            for f=1:numel(fields)
+                vol.echoes{n}.(fields{f}) = subinfo{n}.(fields{f});
+            end
             if ~isfield(vol.echoes{n}, 'TE')
                 vol.echoes{n}.TE = guessfield('TE', vol.nii, n);
             end

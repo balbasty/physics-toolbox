@@ -65,10 +65,12 @@ for e=1:numel(in.echoes)
     dat     = in.echoes{e}.dat;
     t       = in.echoes{e}.TE;                        % Echo time
     y       = y0 - t * r2;                            % Echo fit
-    x       = log(single(dat(1:skip(1):end, ...
+    x       = single(dat(1:skip(1):end, ...
                              1:skip(2):end, ...
-                             1:skip(3):end)));        % Oberved echo
-    msk     = isfinite(y) & isfinite(x) & (x > 0);    % Mask of observed voxels
+                             1:skip(3):end));        % Oberved echo
+    msk     = isfinite(y) & isfinite(x) & x > 0;     % Mask of observed voxels
+    x(~msk) = NaN;
+    x       = log(x);
     y(~msk) = 0;
     x(~msk) = 0;
     clear msk

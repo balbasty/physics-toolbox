@@ -37,7 +37,7 @@ function [sens,meanim,prec,ll,llm,lls,llr] = fit(varargin)
 % CovOptim          - Optimize noise covariance                 [false]
 % MeanIter          - Number of MM-Newton updates               [NaN=guess]
 % MeanIterInit      - Number of initial MM-Newton updates       [NaN=guess]
-% Parallel          - Number of parallel workers                [Inf=all]
+% Threads           - Number of parallel workers                [Inf=all]
 % LLCond            - Previous conditional log-likelihood       [NaN=compute]
 % LLSens            - Previous sensitivity prior log-likelihood [NaN=compute]
 % LLMean            - Previous mean image prior log-likelihood  [NaN=compute]
@@ -46,7 +46,7 @@ function [sens,meanim,prec,ll,llm,lls,llr] = fit(varargin)
 % OUTPUT
 % ------
 % sens - (Log)-Sensitivity maps - (File)Array [Nx Ny Nz Nc]
-% mean - Mean image             - (File)Array [Nx Ny Nz Nc]
+% mean - Mean image             - (File)Array [Nx Ny Nz]
 % prec - Noise precision        -       Array [Nc Nc]
 % ll   - Log-likelihood
 %
@@ -309,17 +309,8 @@ end
 % Note that this is the noise precision in k-space, and is therefore 
 % independent of the lattice size.
 if isempty(prec) || any(any(isnan(prec)))
-    if numel(mask) > 1
-        % Extract calibration region first
-        ac  = utils.ifft(utils.acsub(coils, mask), [1 2 3]);
-        Nac = size(ac,1)*size(ac,2)*size(ac,3);
-    else
-        ac   = coils;
-        Nac  = Nvox;
-    end
-    prec = b1m.init.noise(ac);
+    [prec, Nac] = b1m.init.noise(coils, mask);
     prec = prec / Nac;
-    clear ac Nac
 end
 logdetnoise = utils.logdetPD(prec) * (1 - 0.5 * isreal(coils));
 logdetnoise = logdetnoise * propmask * Nvox;

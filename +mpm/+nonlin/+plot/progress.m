@@ -1,8 +1,8 @@
-function f = progress(out,ll,scl,figname)
+function f = progress(out,ll,scl,means,figname)
 
     % ---------------------------------------------------------------------
     % Get figure object
-    if nargin < 4 || isempty(figname)
+    if nargin < 5 || isempty(figname)
         figname = 'MPM fit';
     end
     f = findobj('Type', 'Figure', 'Name', figname);
@@ -12,6 +12,9 @@ function f = progress(out,ll,scl,figname)
     set(0, 'CurrentFigure', f);   
     clf(f);
     
+    if nargin < 4
+        means = struct;
+    end
     if nargin < 3 || isempty(scl)
         scl = ones(1,numel(ll));
     end
@@ -36,6 +39,24 @@ function f = progress(out,ll,scl,figname)
     if isfield(out, 'logA')
         subplot(nrow,ncol,i);
         imagesc(exp(out.logA.dat(:,:,z)));
+        if isfield(means, 'logA')
+            caxis([0 2*exp(means.logA.dat)]);
+        elseif isfield(means, 'A')
+            caxis([0 2*means.A.dat]);
+        end
+        colormap('gray');
+        colorbar;
+        axis off
+        title('A');
+        i = i+1;
+    elseif isfield(out, 'A')
+        subplot(nrow,ncol,i);
+        imagesc(out.A.dat(:,:,z));
+        if isfield(means, 'logA')
+            caxis([0 2*exp(means.logA.dat)]);
+        elseif isfield(means, 'A')
+            caxis([0 2*means.A.dat]);
+        end
         colormap('gray');
         colorbar;
         axis off
@@ -48,7 +69,28 @@ function f = progress(out,ll,scl,figname)
     if isfield(out, 'logR1')
         subplot(nrow,ncol,i);
         imagesc(exp(out.logR1.dat(:,:,z)));
-        caxis([0 2]);
+        if isfield(means, 'logR1')
+            caxis([0 2*exp(means.logR1.dat)]);
+        elseif isfield(means, 'R1')
+            caxis([0 2*means.R1.dat]);
+        else
+            caxis([0 2]);
+        end
+        colormap('gray');
+        colorbar;
+        axis off
+        title('R1');
+        i = i+1;
+    elseif isfield(out, 'R1')
+        subplot(nrow,ncol,i);
+        imagesc(out.R1.dat(:,:,z));
+        if isfield(means, 'logR1')
+            caxis([0 2*exp(means.logR1.dat)]);
+        elseif isfield(means, 'R1')
+            caxis([0 2*means.R1.dat]);
+        else
+            caxis([0 2]);
+        end
         colormap('gray');
         colorbar;
         axis off
@@ -60,8 +102,29 @@ function f = progress(out,ll,scl,figname)
     % MT
     if isfield(out, 'logMT')
         subplot(nrow,ncol,i);
-        imagesc(1./1-exp(-out.logMT.dat(:,:,z)));
-        caxis([0 0.05]);
+        imagesc(1./(1+exp(-out.logMT.dat(:,:,z))));
+        if isfield(means, 'logMT')
+            caxis([0 2./(1+exp(-means.logMT.dat))]);
+        elseif isfield(means, 'MT')
+            caxis([0 2*means.MT.dat]);
+        else
+            caxis([0 0.05]);
+        end
+        colormap('gray');
+        colorbar;
+        axis off
+        title('MT');
+        i = i+1;
+    elseif isfield(out, 'MT')
+        subplot(nrow,ncol,i);
+        imagesc(out.MT.dat(:,:,z));
+        if isfield(means, 'logMT')
+            caxis([0 2./(1+exp(-means.logMT.dat))]);
+        elseif isfield(means, 'MT')
+            caxis([0 2*means.MT.dat]);
+        else
+            caxis([0 0.05]);
+        end
         colormap('gray');
         colorbar;
         axis off
@@ -74,7 +137,28 @@ function f = progress(out,ll,scl,figname)
     if isfield(out, 'logR2s')
         subplot(nrow,ncol,i);
         imagesc(exp(out.logR2s.dat(:,:,z)));
-        caxis([0 80]);
+        if isfield(means, 'logR2s')
+            caxis([0 2*exp(means.logR2s.dat)]);
+        elseif isfield(means, 'R2s')
+            caxis([0 2*means.R2s.dat]);
+        else
+            caxis([0 80]);
+        end
+        colormap('gray');
+        colorbar;
+        axis off
+        title('R2^*');
+        i = i+1;
+    elseif isfield(out, 'R2s')
+        subplot(nrow,ncol,i);
+        imagesc(out.R2s.dat(:,:,z));
+        if isfield(means, 'logR2s')
+            caxis([0 2*exp(means.logR2s.dat)]);
+        elseif isfield(means, 'R2s')
+            caxis([0 2*means.R2s.dat]);
+        else
+            caxis([0 80]);
+        end
         colormap('gray');
         colorbar;
         axis off
