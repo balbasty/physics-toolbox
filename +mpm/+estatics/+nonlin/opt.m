@@ -8,17 +8,16 @@ function o = opt(o)
 
 % --- Default values
 if nargin < 1, o = struct; end
-o = setdefault(o, 'nbscales',         5);         % Number of scales
-o = setdefault(o, 'nbiter',           3);         % Number of iterations per scale
+o = setdefault(o, 'nbscales',         1);         % Number of scales
+o = setdefault(o, 'nbiter',           20);         % Number of iterations per scale
 o = setdefault(o, 'tolerance',        1E-4);      % Gain threshold for early stopping (per scale)
 o = setdefault(o, 'out.folder',       '.');       % Output folder
 o = setdefault(o, 'out.fname',        '.nii');    % Suffix for output files 
 o = setdefault(o, 'out.mem',          'map');     % map/load output volumes
-o = setdefault(o, 'reg.mode.default', [0 1]);     % Absolute/Membrane regul. (0=None|1=L1|2=L2)
-o = setdefault(o, 'reg.prec.default', [1E0 1E2]); % Absolute/Membrane precision
-o = setdefault(o, 'reg.prec.R2s',     [1E0 1E2]);
-o = setdefault(o, 'reg.mean.default', NaN);       % Mean (NaN = from minilogfit)
-o = setdefault(o, 'reg.uncertainty' , 1E-3);      % RLS smoother (value|'bayes')
+o = setdefault(o, 'reg.mode',         1);         % Membrane regul. (0=None|1=L1|2=L2)
+o = setdefault(o, 'reg.inter',        5E3);       % Membrane precision
+o = setdefault(o, 'reg.decay',        1E1);       % Membrane precision
+o = setdefault(o, 'reg.smo',          1E-3);      % RLS smoother
 o = setdefault(o, 'vs',               NaN);       % Reconstruction voxel size (Nan=from input)
 o = setdefault(o, 'fov',              0);         % Field of view (0=bounding box|n=index of input volume)
 o = setdefault(o, 'mat',              1);         % Orientation matrix (n=index of input volume)
@@ -32,7 +31,7 @@ o = setdefault(o, 'solver.nbiter',    50);        % Number of iterations of the 
 o = setdefault(o, 'solver.tolerance', 0);         % Solver gain threshold 
 o = setdefault(o, 'solver.verbose',   true);      % Solver verbosity 
 o = setdefault(o, 'solver.sumtype',   'double');  % Solver accumulator type ('double'|'native')
-o = setdefault(o, 'solver.precond',   true);      % [CG only] use preconditioner 
+o = setdefault(o, 'solver.precond',   false);     % [CG only] use preconditioner 
 o = setdefault(o, 'predict',          []);        % Predict echoes at given TEs
 
 % --- Reformat options

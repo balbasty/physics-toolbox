@@ -11,6 +11,7 @@ function dy = solve(H, g, mode, prec, vs)
 
     fmg = [2 2];
     spm_field('boundary', 1);
+    if numel(mode) == 1, mode = mode * ones(size(prec)); end
     prec = prec .* (mode > 0);
     dy = spm_field(single(H), single(g), [vs 0 1 0 fmg], prec(:)');
 

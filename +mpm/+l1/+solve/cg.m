@@ -23,6 +23,8 @@ function [dy,info] = cg(H, g, w, mode, prec, vs, opt, dy)
     if ~isfield(opt, 'precond'),   opt.precond   = true;  end
     if ~isfield(opt, 'fmginit'),   opt.fmginit   = true;  end
 
+    if numel(mode) == 1, mode = mode * ones(size(prec)); end
+    
     % Neumann boundary conditon
     spm_field('boundary', 1);
     fmg = [2 2];

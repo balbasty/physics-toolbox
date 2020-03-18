@@ -28,8 +28,8 @@ function [out,in,pred] = fit(in,opt)
 %   init         ['mean']  Init mode: 'mean'/'logfit'/'minilogfit'
 %   subsample    [Inf]     Subsampling distance in mm
 %   threads      [-1]      Number of threads used by SPM
-%   solver.type      ['relax'] Solver used for L1 regularisation (relax|cg)
-%   solver.nbiter    [10]      Number of iterations of the linear solver
+%   solver.type      ['cg']    Solver used for L1 regularisation (relax|cg)
+%   solver.nbiter    [50]      Number of iterations of the linear solver
 %   solver.tolerance [0]       Solver gain threshold for early stopping
 %   solver.verbose   [1]       Solver verbosity 
 %
@@ -63,34 +63,16 @@ nbcontrasts = numel(contrasts);
 % -------------------------------------------------------------------------
 % Default regularisation parameters
 % -------------------------------------------------------------------------
-% --- set default parameters
-for ct=contrasts
-    ct = ct{1};
-    if~isfield(opt.reg.prec, ct)
-        opt.reg.prec.(ct) = opt.reg.prec.default;
-    end
-    if~isfield(opt.reg.mean, ct)
-        opt.reg.mean.(ct) = opt.reg.mean.default;
-    end
-    if~isfield(opt.reg.mode, ct)
-        opt.reg.mode.(ct) = opt.reg.mode.default;
-    end
-end
-% --- convert named parameters to vectors
-reg0 = opt.reg;
-opt.reg.mode = cell2mat(cellfun(@(x) reg0.mode.(x), contrasts(:), 'UniformOutput', false));
-opt.reg.prec = cell2mat(cellfun(@(x) reg0.prec.(x), contrasts(:), 'UniformOutput', false));
-opt.reg.mean = cellfun(@(x) reg0.mean.(x), contrasts(:));
-% --- estimate mean parameter value + correct regularisation
+lambda = [repmat(opt.reg.inter, [nbcontrasts-1 1]); opt.reg.decay];
 if opt.verbose > 0, fprintf('Guess mean parameter value to correct regularisation\n'); end
 mu = mpm.estatics.loglin.fit.mini(in);
 mu = cellfun(@(x) mu.(x).dat, contrasts(:));
-opt.reg.mean(isnan(opt.reg.mean)) = mu(isnan(opt.reg.mean));
-opt.reg.prec(:,2) = opt.reg.prec(:,2) ./ mu(:).^2;
+lambda = lambda ./ mu(:).^2;
 if opt.verbose > 0
-for n=1:numel(mu)
-    fprintf('* Param %d | mean: %7.3g | prec: %7.3g\n', n, mu(n), opt.reg.prec(n,2));
-end
+    for n=1:numel(mu)
+        fprintf('* Param %s | mean: %7.3g | prec: %7.3g\n', ...
+                contrasts{n}, mu(n), lambda(n));
+    end
 end
 
 % -------------------------------------------------------------------------
@@ -120,15 +102,10 @@ prefix = contrasts;
 value  = zeros(1,nbcontrasts);
 dim    = repmat([scales(end).dim(:); 1], [1 nbcontrasts]);
 mat    = repmat(scales(end).mat, [1 1 nbcontrasts]);
-if any(opt.reg.mode(:,2)==1)
+if opt.reg.mode == 1
     prefix = [prefix {'W'}];
     value  = [value 1];
     dim    = [dim [scales(end).dim(:); 1]];
-    if ischar(opt.reg.uncertainty) && strcmpi(opt.reg.uncertainty, 'bayes')
-        prefix = [prefix {'U'}];
-        value  = [value 1E-3];
-        dim    = [dim [scales(end).dim(:); nbcontrasts]];
-    end
 end
 % --- Create
 out = mpm.io.output(prefix, dim, mat, value, 'single', opt.out);
@@ -147,7 +124,7 @@ switch lower(opt.init)
         out = mpm.estatics.loglinfit.core(in,out,opt.subsample,opt.verbose);
     case 'mean'
         for k=1:numel(contrasts)
-            out.(contrasts{k}).dat(:) = opt.reg.mean(k);
+            out.(contrasts{k}).dat(:) = mu(k);
         end
     otherwise
         error('Initialisation mode ''%s'' not implemented.', init);
@@ -160,7 +137,7 @@ if opt.verbose > 1, mpm.estatics.plot.progress(out,[]); end
 if opt.verbose > 0, fprintf('ESTATICS nonlinear fit\n'); end
 ll  = [];
 scl = [];
-opt.reg.prec0 = opt.reg.prec;
+lambda0 = lambda;
 for s=numel(scales):-1:1
     
     % ---------------------------------------------------------------------
@@ -168,19 +145,13 @@ for s=numel(scales):-1:1
     % ---------------------------------------------------------------------
     if opt.verbose > 0, fprintf('Scale %i\n', s); end
     dim = scales(s).dim;
-    % vs  = scales(s).vs;
     vs  = sqrt(sum(scales(s).mat(1:3,1:3).^2));
     sub = scales(s).sub;
     ff  = scales(s).ff;
-    opt.reg.prec = ff * opt.reg.prec0 * prod(vs);
-    
-    % ---------------------------------------------------------------------
-    % A bit of ad-hoc fudging for L2 regularisation
-    % ---------------------------------------------------------------------
-%     opt.reg.prec(opt.reg.mode(:,2)==2,2) = opt.reg.prec(opt.reg.mode(:,2)==2,2) * power(10,s-1);
+    lambda = ff * lambda0 * prod(vs);
     
     it0 = numel(ll)+1;
-    for it=1:(opt.nbiter+s)
+    for it=1:(opt.nbiter+s-1)
     
         if opt.verbose > 0, fprintf('Iteration %i\n', it); end
 
@@ -221,35 +192,18 @@ for s=numel(scales):-1:1
         if opt.verbose > 0, fprintf('\n'); end
 
         % -----------------------------------------------------------------
-        % Gradient: Absolute
-        if any(opt.reg.mode(:,1) > 0)
-            if opt.verbose > 0, fprintf('Gradient: absolute '); end
-            for k=1:nbcontrasts
-                if opt.reg.mode(k,1) == 2
-                    fprintf('.');
-                    y = single(out.(contrasts{k}).dat()) - opt.reg.mean(k);
-                    g(:,:,:,k) = g(:,:,:,k) + opt.reg.prec(k,1) * y;
-                    H(:,:,:,k) = H(:,:,:,k) + opt.reg.prec(k,1);
-                    lly = lly - 0.5 * sum(y(:).^2, 'double');
-                    clear y
-                end
-            end
-            if opt.verbose > 0, fprintf('\n'); end
-        end
-
-        % -----------------------------------------------------------------
         % Gradient: Membrane
-        if any(opt.reg.mode(:,2) > 0)
+        if opt.reg.mode > 0
             if opt.verbose > 0, fprintf('Gradient: membrane '); end
             w    = 0;
             wnew = 0;
-            if any(opt.reg.mode(:,2) == 1), w = 1./single(out.W.dat()); end
+            if opt.reg.mode == 1, w = 1./single(out.W.dat()); end
             for k=1:nbcontrasts
-                switch opt.reg.mode(k,2)
+                switch opt.reg.mode
                     case 1
                         if opt.verbose > 0, fprintf('.'); end
                         Ly = single(out.(contrasts{k}).dat());
-                        [Ly,Dy] = mpm.l1.vel2mom(Ly, opt.reg.prec(k,2), vs, w);
+                        [Ly,Dy] = mpm.l1.vel2mom(Ly, lambda(k), vs, w);
                         Dy = sum(sum(Dy.^2,5),4);
                         wnew = wnew + Dy;
                         g(:,:,:,k) = g(:,:,:,k) + Ly;
@@ -257,26 +211,22 @@ for s=numel(scales):-1:1
                     case 2
                         if opt.verbose > 0, fprintf('.'); end
                         y  = single(out.(contrasts{k}).dat());
-                        Ly = mpm.l2.vel2mom(y, opt.reg.prec(k,2), vs);
+                        Ly = mpm.l2.vel2mom(y, lambda(k), vs);
                         g(:,:,:,k) = g(:,:,:,k) + Ly;
                         lly = lly - 0.5*sum(y(:).*Ly(:), 'double');
                         clear y Ly
                 end
             end
             if opt.verbose > 0, fprintf('\n'); end
-            if any(opt.reg.mode(:,2) == 1)
-                if ischar(opt.reg.uncertainty) && strcmpi(opt.reg.uncertainty, 'bayes')
-                    wnew = sqrt(wnew + sum(single(out.U.dat()), 4));
-                else
-                    wnew = sqrt(wnew + opt.reg.uncertainty);
-                end
+            if opt.reg.mode == 1
+                wnew = sqrt(wnew + opt.reg.smo);
                 lly = lly - sum(wnew(:), 'double');
             end
         end
 
         % -----------------------------------------------------------------
         % Update MTV weights
-        if any(opt.reg.mode(:,2)==1)
+        if opt.reg.mode ==1
             if opt.verbose > 0, fprintf('Update: MTV weights\n'); end
             out.W.dat(:,:,:) = wnew; clear Wnew
         end
@@ -293,19 +243,15 @@ for s=numel(scales):-1:1
         % -----------------------------------------------------------------
         % Gauss-Newton
         % - Compute step
-        if all(opt.reg.mode(:,2) == 0)
+        if opt.reg.mode == 0
         % No regularisation
             dy = mpm.l0.solve(H,g);
-        elseif any(opt.reg.mode(:,2) == 1)
+        elseif opt.reg.mode == 1
         % Some L1 regularisation
-            dy = opt.solver.fun(H, g, w, opt.reg.mode(:,2), opt.reg.prec(:,2), vs, opt.solver);
-            % Uncertainty about y
-            if ischar(opt.reg.uncertainty) && strcmpi(opt.reg.uncertainty, 'bayes')
-                out.U.dat(:,:,:,:) = mpm.l1.uncertainty(H, opt.reg.prec(:,2), vs, w);
-            end
+            dy = opt.solver.fun(H, g, w, opt.reg.mode, lambda, vs, opt.solver);
         else
         % Some L2 but no L1 regularisation
-            dy = mpm.l2.solve(H, g, opt.reg.mode(:,2), opt.reg.prec(:,2), vs);
+            dy = mpm.l2.solve(H, g, opt.reg.mode, lambda, vs);
         end
         clear H g W
         % - Update
@@ -354,8 +300,7 @@ for s=numel(scales):-1:1
     
 end
 
-out = mpm.estatics.extrapolate(out,opt.out.fname);
-
+out  = mpm.estatics.extrapolate(out,opt.out.fname);
 pred = mpm.estatics.predict(out,in,opt);
 
 utils.threads.set(nthreads0);
