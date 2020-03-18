@@ -52,7 +52,7 @@ if nargout > 1
     end
 end
 for e=1:numel(in.echoes)
-    opt.verbose > 0 && fprintf('.');
+    if opt.verbose > 0, fprintf('.'); end
     % ---------------------------------------------------------------------
     % Compute residuals
     dat     = in.echoes{e}.dat;
