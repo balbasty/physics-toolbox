@@ -7,6 +7,7 @@ function [dim,mat] = fov(dims,mats,vs,fov,mat)
 % mats - [4x4xN] V2W matrix of each volume
 % vs   - [3x1]   Voxel size of the recon maps [default: first/specified volume]
 % fov  -         Index of FOV to use ([0] = bounding box)
+% mat  -         Output mat or index of mat to use [1]
 % dim  - [3x1]   Output dimension
 % mat  - [4x4]   Output V2W matrix
 

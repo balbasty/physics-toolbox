@@ -16,7 +16,7 @@ o = setdefault(o, 'out.fname',        '.nii');    % Suffix for output files
 o = setdefault(o, 'out.mem',          'map');     % map/load output volumes
 o = setdefault(o, 'reg.mode',         1);         % Membrane regul. (0=None|1=L1|2=L2)
 o = setdefault(o, 'reg.inter',        5E3);       % Membrane precision
-o = setdefault(o, 'reg.decay',        1E1);       % Membrane precision
+o = setdefault(o, 'reg.R2s',          1E1);       % Membrane precision
 o = setdefault(o, 'reg.smo',          1E-3);      % RLS smoother
 o = setdefault(o, 'vs',               NaN);       % Reconstruction voxel size (Nan=from input)
 o = setdefault(o, 'fov',              0);         % Field of view (0=bounding box|n=index of input volume)
