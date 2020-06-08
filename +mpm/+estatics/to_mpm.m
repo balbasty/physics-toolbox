@@ -33,8 +33,10 @@ FA_PDw = estatics.PDw.extras.FA;
 TR_PDw = estatics.PDw.extras.TR;
 FA_T1w = estatics.T1w.extras.FA;
 TR_T1w = estatics.T1w.extras.TR;
-FA_MTw = estatics.MTw.extras.FA;
-TR_MTw = estatics.MTw.extras.TR;
+if isfield(estatics, 'MTw')
+    FA_MTw = estatics.MTw.extras.FA;
+    TR_MTw = estatics.MTw.extras.TR;
+end
 
 % -------------------------------------------------------------------------
 % Read PDw data
@@ -47,7 +49,7 @@ if isfield(pre, 'B1m')
     if coreg, T = utils.coreg({estatics.PDw.dat.fname estatics.PDw.mat}, ...
                               {B1m.struct.fname B1m.mat});
     else,     T = eye(4); end
-    B1m = utils.pull(single(B1m.map()), estatics.dim, (T\B1m.mat)\estatics.PDw.mat);
+    B1m = utils.pull(single(B1m.map()), (T\B1m.mat)\estatics.PDw.mat, estatics.dim);
     B1m = log(max(B1m, eps('single')));
 end
 PDw = exp(single(estatics.PDw.dat()) - B1m);
@@ -63,7 +65,7 @@ if isfield(pre, 'B1p')
                               {B1p.struct.fname B1p.mat});
     else,     T = eye(4); end
     if strcmpi(B1p.unit, 'p.u.'), norm = 100; else, norm = 1; end
-    B1p = utils.pull(single(B1p.map()), estatics.dim, (T\B1p.mat)\estatics.PDw.mat);
+    B1p = utils.pull(single(B1p.map()), (T\B1p.mat)\estatics.PDw.mat, estatics.dim);
     B1p = max(B1p/norm, eps('single'));
 end
 FA_PDw = FA_PDw * B1p;
@@ -82,7 +84,7 @@ if isfield(pre, 'B1m')
     if coreg, T = utils.coreg({estatics.T1w.dat.fname estatics.T1w.mat}, ...
                               {B1m.struct.fname B1m.mat});
     else,     T = eye(4); end
-    B1m = utils.pull(single(B1m.map()), estatics.dim, (T\B1m.mat)\estatics.T1w.mat);
+    B1m = utils.pull(single(B1m.map()), (T\B1m.mat)\estatics.T1w.mat, estatics.dim);
     B1m = log(max(B1m, eps('single')));
 end
 fprintf('Read T1w\n');
@@ -99,7 +101,7 @@ if isfield(pre, 'B1p')
                               {B1p.struct.fname B1p.mat});
     else,     T = eye(4); end
     if strcmpi(B1p.unit, 'p.u.'), norm = 100; else, norm = 1; end
-    B1p = utils.pull(single(B1p.map()), estatics.dim, (T\B1p.mat)\estatics.T1w.mat);
+    B1p = utils.pull(single(B1p.map()), (T\B1p.mat)\estatics.T1w.mat, estatics.dim);
     B1p = max(B1p/norm, eps('single'));
 end
 FA_T1w = FA_T1w .* B1p;
@@ -140,7 +142,7 @@ if isfield(estatics, 'MTw')
         if coreg, T = utils.coreg({estatics.MTw.dat.fname estatics.MTw.mat}, ...
                                   {B1m.struct.fname B1m.mat});
         else,     T = eye(4); end
-        B1m = utils.pull(single(B1m.map()), estatics.dim, (T\B1m.mat)\estatics.MTw.mat);
+        B1m = utils.pull(single(B1m.map()), (T\B1m.mat)\estatics.MTw.mat, estatics.dim);
         B1m = log(max(B1m, eps('single')));
     end
     fprintf('Read MTw\n');
@@ -157,7 +159,7 @@ if isfield(estatics, 'MTw')
                                   {B1p.struct.fname B1p.mat});
         else,     T = eye(4); end
         if strcmpi(B1p.unit, 'p.u.'), norm = 100; else, norm = 1; end
-        B1p = utils.pull(single(B1p.map()), estatics.dim, (T\B1p.mat)\estatics.MTw.mat);
+        B1p = utils.pull(single(B1p.map()), (T\B1p.mat)\estatics.MTw.mat, estatics.dim);
         B1p = max(B1p/norm, eps('single'));
     end
     FA_MTw = FA_MTw * B1p;
